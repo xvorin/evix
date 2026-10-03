@@ -1,0 +1,12 @@
+build
+output
+3rdparty/install/
+
+# 编辑器
+.vscode
+
+# 目标文件
+*.o
+*.a
+*.so
+*.so.*
