@@ -5,6 +5,8 @@ output
 # 编辑器
 .vscode
 
+.cache
+
 # 目标文件
 *.o
 *.a

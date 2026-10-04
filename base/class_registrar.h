@@ -49,10 +49,13 @@ public:
     {
         auto create_instance = [=]() { return generator(); };
         auto once = std::make_shared<std::once_flag>();
-        std::shared_ptr<B> retval = nullptr;
-        auto get_instance = [=]() mutable {
-            std::call_once(*once, [&]() { retval = create_instance(); });
-            return retval;
+        // The lazily-created singleton is held in a shared slot so every copy
+        // of this generator (e.g. one taken out from under the lock below)
+        // observes the same cached instance instead of its own private null.
+        auto retval = std::make_shared<std::shared_ptr<B>>();
+        auto get_instance = [=]() {
+            std::call_once(*once, [&]() { *retval = create_instance(); });
+            return *retval;
         };
         std::unique_lock<std::mutex> lock_holder;
         auto& storage = get_object_storage(lock_holder);
@@ -61,43 +64,63 @@ public:
 
     static std::shared_ptr<B> get_instance(const std::string& key)
     {
-        std::unique_lock<std::mutex> lock_holder;
-        auto& storage = get_object_storage(lock_holder);
-        auto iter = storage.find(key);
-        return (iter == storage.end()) ? nullptr : iter->second.get_instance();
+        ObjectGenerator gen;
+        {
+            std::unique_lock<std::mutex> lock_holder;
+            auto& storage = get_object_storage(lock_holder);
+            auto iter = storage.find(key);
+            if (iter == storage.end()) {
+                return nullptr;
+            }
+            gen = iter->second.get_instance;
+        }
+        // Invoke the generator (which may construct the object, run user code,
+        // and even re-enter the registry) with the storage mutex released.
+        return gen();
     }
 
     static std::shared_ptr<B> create_instance(const std::string& key)
     {
-        std::unique_lock<std::mutex> lock_holder;
-        auto& storage = get_object_storage(lock_holder);
-        auto iter = storage.find(key);
-        return (iter == storage.end()) ? nullptr : iter->second.create_instance();
+        ObjectGenerator gen;
+        {
+            std::unique_lock<std::mutex> lock_holder;
+            auto& storage = get_object_storage(lock_holder);
+            auto iter = storage.find(key);
+            if (iter == storage.end()) {
+                return nullptr;
+            }
+            gen = iter->second.create_instance;
+        }
+        return gen();
     }
 
     static void for_each(const ObjectVisitor& visitor)
     {
-        std::unique_lock<std::mutex> lock_holder;
-        auto& storage = get_object_storage(lock_holder);
-        std::multimap<int, std::pair<std::string, std::shared_ptr<B>>> objects;
-        for (auto& s : storage) {
-            objects.emplace(s.second.serial, std::make_pair(s.first, s.second.get_instance()));
+        std::multimap<int, std::pair<std::string, ObjectGenerator>> generators;
+        {
+            std::unique_lock<std::mutex> lock_holder;
+            auto& storage = get_object_storage(lock_holder);
+            for (auto& s : storage) {
+                generators.emplace(s.second.serial, std::make_pair(s.first, s.second.get_instance));
+            }
         }
-        for (auto iter = objects.begin(); iter != objects.end(); iter++) {
-            visitor(iter->second.first, iter->second.second);
+        for (auto iter = generators.begin(); iter != generators.end(); iter++) {
+            visitor(iter->second.first, iter->second.second());
         }
     }
 
     static void for_each_reverse(const ObjectVisitor& visitor)
     {
-        std::unique_lock<std::mutex> lock_holder;
-        auto& storage = get_object_storage(lock_holder);
-        std::multimap<int, std::pair<std::string, std::shared_ptr<B>>> objects;
-        for (auto& s : storage) {
-            objects.emplace(s.second.serial, std::make_pair(s.first, s.second.get_instance()));
+        std::multimap<int, std::pair<std::string, ObjectGenerator>> generators;
+        {
+            std::unique_lock<std::mutex> lock_holder;
+            auto& storage = get_object_storage(lock_holder);
+            for (auto& s : storage) {
+                generators.emplace(s.second.serial, std::make_pair(s.first, s.second.get_instance));
+            }
         }
-        for (auto iter = objects.rbegin(); iter != objects.rend(); iter++) {
-            visitor(iter->second.first, iter->second.second);
+        for (auto iter = generators.rbegin(); iter != generators.rend(); iter++) {
+            visitor(iter->second.first, iter->second.second());
         }
     }
 
@@ -118,10 +141,8 @@ private:
 #define HELPER_NAME_LEVEL1(n) HELPER_NAME_LEVEL2(n)
 #define HELPER_NAME_LEVEL2(n) ClassRegister##n
 
-#define DECLARE_CLASSTYPE(key, Base, Derive, ...)                     \
-    static xvorin::evix::ClassRegistrar<Base>::RegisterHelper<Derive> \
-        HELPER_NAME(__COUNTER__)(key, ##__VA_ARGS__);
+#define DECLARE_CLASSTYPE(key, Base, Derive, ...)                                                                      \
+    static xvorin::evix::ClassRegistrar<Base>::RegisterHelper<Derive> HELPER_NAME(__COUNTER__)(key, ##__VA_ARGS__);
 
-#define DECLARE_GENERATOR(key, Base, Gen, ...)                      \
-    static xvorin::evix::ClassRegistrar<Base>::RegisterHelper<void> \
-        HELPER_NAME(__COUNTER__)(key, Gen, ##__VA_ARGS__);
+#define DECLARE_GENERATOR(key, Base, Gen, ...)                                                                         \
+    static xvorin::evix::ClassRegistrar<Base>::RegisterHelper<void> HELPER_NAME(__COUNTER__)(key, Gen, ##__VA_ARGS__);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "net/tcp_connection.h"
+#include "evix/net/tcp_connection.h"
 
 #include <atomic>
 #include <mutex>
@@ -12,9 +12,6 @@ using ConnectorPtr = std::shared_ptr<Connector>;
 
 class TcpClient {
 public:
-    TcpClient(const TcpClient&) = delete;
-    void operator=(const TcpClient&) = delete;
-
     TcpClient(EventLoop* loop, const InetAddress& serverAddr, const std::string& nameArg);
     ~TcpClient();
 
@@ -63,6 +60,10 @@ public:
     {
         write_complete_callback_ = std::move(cb);
     }
+
+private:
+    TcpClient(const TcpClient&) = delete;
+    void operator=(const TcpClient&) = delete;
 
 private:
     void new_connection(int sockfd);

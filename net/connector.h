@@ -1,6 +1,6 @@
 #pragma once
 
-#include "net/inet_address.h"
+#include "evix/net/inet_address.h"
 
 #include <atomic>
 #include <functional>
@@ -13,12 +13,9 @@ class EventLoop;
 
 class Connector : public std::enable_shared_from_this<Connector> {
 public:
-    Connector(const Connector&) = delete;
+    using NewConnectionCallback = std::function<void(int sockfd)>;
 
-    void operator=(const Connector&) = delete;
-
-    typedef std::function<void(int sockfd)> NewConnectionCallback;
-
+public:
     Connector(EventLoop* loop, const InetAddress& serverAddr);
 
     ~Connector();
@@ -40,11 +37,11 @@ public:
     }
 
 private:
-    enum States {
-        kDisconnected,
-        kConnecting,
-        kConnected
-    };
+    Connector(const Connector&) = delete;
+    void operator=(const Connector&) = delete;
+
+private:
+    enum States { kDisconnected, kConnecting, kConnected };
 
     static const int kMaxRetryDelayMs = 30 * 1000;
 

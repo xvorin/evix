@@ -1,14 +1,14 @@
 #pragma once
 
-#include "net/endian.h"
-
-#include <assert.h>
-#include <string.h>
+#include "evix/net/endian.h"
 
 #include <algorithm>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <assert.h>
+#include <string.h>
 
 namespace xvorin::evix::net {
 
@@ -62,7 +62,7 @@ public:
     {
         // FIXME: replace with memmem()?
         const char* crlf = std::search(peek(), begin_write(), kCRLF, kCRLF + 2);
-        return crlf == begin_write() ? NULL : crlf;
+        return crlf == begin_write() ? nullptr : crlf;
     }
 
     const char* find_crlf(const char* start) const
@@ -71,7 +71,7 @@ public:
         assert(start <= begin_write());
         // FIXME: replace with memmem()?
         const char* crlf = std::search(start, begin_write(), kCRLF, kCRLF + 2);
-        return crlf == begin_write() ? NULL : crlf;
+        return crlf == begin_write() ? nullptr : crlf;
     }
 
     const char* find_eol() const

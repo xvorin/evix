@@ -24,9 +24,6 @@ enum EvmThreadCreateType {
 
 class EventLoopManager {
 public:
-    EventLoopManager(const EventLoopManager&) = delete;
-    void operator=(const EventLoopManager&) = delete;
-
     struct ThreadAttribute {
         std::string name;
         EvmThreadCreateType unique;
@@ -44,18 +41,20 @@ public:
     void run();
     void quit();
 
-    int createCustomAttributes(const std::string& name, EvmThreadCreateType unique,
-        int stack_size = 256, int policy = SCHED_OTHER, int priority = 0, std::vector<bool> affinity = {});
+    int createCustomAttributes(const std::string& name, EvmThreadCreateType unique, int stack_size = 256,
+        int policy = SCHED_OTHER, int priority = 0, std::vector<bool> affinity = {});
 
     std::shared_ptr<xvorin::evix::net::EventLoop> get_event_loop(const std::string& name = "");
     std::shared_ptr<xvorin::evix::net::EventLoop> get_current_event_loop();
 
 private:
+    EventLoopManager(const EventLoopManager&) = delete;
+    void operator=(const EventLoopManager&) = delete;
+
+private:
     std::shared_ptr<xvorin::evix::net::EventLoop> create_event_loop(const ThreadAttribute& attr);
     static void* create_event_loop_detail(void* arg);
     static void install_trace_back_signals();
-    static void trace_back(int signo);
-    static std::string demangle_name(const std::string& mangled);
     inline size_t get_upper_limit(int type, size_t dft);
 };
 

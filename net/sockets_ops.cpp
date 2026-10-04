@@ -1,6 +1,11 @@
-#include "net/sockets_ops.h"
+#include "evix/net/sockets_ops.h"
 
-#include "net/endian.h"
+#include "evix/base/logging.h"
+#include "evix/net/endian.h"
+
+#include <cassert>
+#include <cstdlib>
+#include <cstring>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -9,16 +14,9 @@
 #include <sys/uio.h> // readv
 #include <unistd.h>
 
-#include <cassert>
-#include <cstdlib>
-#include <cstring>
-
-using namespace xvorin::evix;
-using namespace xvorin::evix::net;
-
 namespace {
 
-typedef struct sockaddr SA;
+using SA = struct sockaddr;
 
 #if VALGRIND || defined(NO_ACCEPT4)
 void set_non_block_and_close_on_exec(int sockfd)
@@ -38,6 +36,8 @@ void set_non_block_and_close_on_exec(int sockfd)
 #endif
 
 } // namespace
+
+namespace xvorin::evix::net {
 
 const struct sockaddr* sockets::sockaddr_cast(const struct sockaddr_in6* addr)
 {
@@ -64,22 +64,29 @@ const struct sockaddr_in6* sockets::sockaddr_in6_cast(const struct sockaddr* add
     return static_cast<const struct sockaddr_in6*>(static_cast<const void*>(addr));
 }
 
-int sockets::createNonblockingOrDie(sa_family_t family)
+int sockets::create_nonblocking_or_die(sa_family_t family)
 {
 #if VALGRIND
     int sockfd = ::socket(family, SOCK_STREAM, IPPROTO_TCP);
     if (sockfd < 0) {
-        LOG_SYSFATAL << "sockets::createNonblockingOrDie";
+        EXLF("sockets::create_nonblocking_or_die() failed: %s", strerror(errno));
     }
     set_non_block_and_close_on_exec(sockfd);
 #else
-    int sockfd = ::socket(family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
-        IPPROTO_TCP);
+    int sockfd = ::socket(family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, IPPROTO_TCP);
     if (sockfd < 0) {
-        fprintf(stderr, "sockets::createNonblockingOrDie\n");
-        abort();
+        EXLF("sockets::create_nonblocking_or_die() failed: %s", strerror(errno));
     }
 #endif
+    return sockfd;
+}
+
+int sockets::create_nonblocking_udp_or_die(sa_family_t family)
+{
+    int sockfd = ::socket(family, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, IPPROTO_UDP);
+    if (sockfd < 0) {
+        EXLF("sockets::create_nonblocking_udp_or_die() failed: %s", strerror(errno));
+    }
     return sockfd;
 }
 
@@ -87,8 +94,7 @@ void sockets::bind_or_die(int sockfd, const struct sockaddr* addr)
 {
     int ret = ::bind(sockfd, addr, static_cast<socklen_t>(sizeof(struct sockaddr_in6)));
     if (ret < 0) {
-        fprintf(stderr, "sockets::bind_or_die\n");
-        abort();
+        EXLF("sockets::bind_or_die(%d) failed: %s", sockfd, strerror(errno));
     }
 }
 
@@ -96,8 +102,7 @@ void sockets::listen_or_die(int sockfd)
 {
     int ret = ::listen(sockfd, SOMAXCONN);
     if (ret < 0) {
-        fprintf(stderr, "sockets::listen_or_die\n");
-        abort();
+        EXLF("sockets::listen_or_die(%d) failed: %s", sockfd, strerror(errno));
     }
 }
 
@@ -108,8 +113,7 @@ int sockets::accept(int sockfd, struct sockaddr_in6* addr)
     int connfd = ::accept(sockfd, sockaddr_cast(addr), &addrlen);
     set_non_block_and_close_on_exec(connfd);
 #else
-    int connfd = ::accept4(sockfd, sockaddr_cast(addr), &addrlen,
-        SOCK_NONBLOCK | SOCK_CLOEXEC);
+    int connfd = ::accept4(sockfd, sockaddr_cast(addr), &addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC);
 #endif
     if (connfd < 0) {
         int savedErrno = errno;
@@ -133,11 +137,11 @@ int sockets::accept(int sockfd, struct sockaddr_in6* addr)
         case ENOTSOCK:
         case EOPNOTSUPP:
             // unexpected errors
-            fprintf(stderr, "unexpected error of ::accept %d\n", savedErrno);
+            EXLE("unexpected error of ::accept %d", savedErrno);
             break;
 
         default:
-            fprintf(stderr, "unknown error of ::accept %d\n", savedErrno);
+            EXLE("unknown error of ::accept %d", savedErrno);
             break;
         }
     }
@@ -167,17 +171,31 @@ ssize_t sockets::write(int sockfd, const void* buf, size_t count)
 void sockets::close(int sockfd)
 {
     if (::close(sockfd) < 0) {
+        EXLE("sockets::close(%d) failed: %s", sockfd, strerror(errno));
     }
 }
 
 void sockets::shutdown_write(int sockfd)
 {
     if (::shutdown(sockfd, SHUT_WR) < 0) {
+        EXLE("sockets::shutdown_write(%d) failed: %s", sockfd, strerror(errno));
     }
 }
 
 void sockets::to_ip_port(char* buf, size_t size, const struct sockaddr* addr)
 {
+    if (addr->sa_family == AF_INET6) {
+        // IPv6 literals are wrapped in brackets so the ':' port separator is
+        // unambiguous, e.g. "[fe80::1]:8080".
+        buf[0] = '[';
+        to_ip(buf + 1, size - 1, addr);
+        size_t end = ::strlen(buf);
+        const struct sockaddr_in6* addr6 = sockaddr_in6_cast(addr);
+        uint16_t port = sockets::networkToHost16(addr6->sin6_port);
+        assert(size > end);
+        snprintf(buf + end, size - end, "]:%u", port);
+        return;
+    }
     to_ip(buf, size, addr);
     size_t end = ::strlen(buf);
     const struct sockaddr_in* addr4 = sockaddr_in_cast(addr);
@@ -204,6 +222,7 @@ void sockets::from_ip_port(const char* ip, uint16_t port, struct sockaddr_in* ad
     addr->sin_family = AF_INET;
     addr->sin_port = hostToNetwork16(port);
     if (::inet_pton(AF_INET, ip, &addr->sin_addr) <= 0) {
+        EXLE("sockets::from_ip_port() invalid IPv4 address '%s'", ip);
     }
 }
 
@@ -212,6 +231,7 @@ void sockets::from_ip_port(const char* ip, uint16_t port, struct sockaddr_in6* a
     addr->sin6_family = AF_INET6;
     addr->sin6_port = hostToNetwork16(port);
     if (::inet_pton(AF_INET6, ip, &addr->sin6_addr) <= 0) {
+        EXLE("sockets::from_ip_port() invalid IPv6 address '%s'", ip);
     }
 }
 
@@ -228,20 +248,22 @@ int sockets::get_socket_error(int sockfd)
 
 struct sockaddr_in6 sockets::get_local_addr(int sockfd)
 {
-    struct sockaddr_in6 localaddr;
+    struct sockaddr_in6 localaddr = {};
     memset(&localaddr, 0x00, sizeof localaddr);
     socklen_t addrlen = static_cast<socklen_t>(sizeof localaddr);
     if (::getsockname(sockfd, sockaddr_cast(&localaddr), &addrlen) < 0) {
+        EXLE("sockets::get_local_addr(%d) failed: %s", sockfd, strerror(errno));
     }
     return localaddr;
 }
 
 struct sockaddr_in6 sockets::get_peer_addr(int sockfd)
 {
-    struct sockaddr_in6 peeraddr;
+    struct sockaddr_in6 peeraddr = {};
     memset(&peeraddr, 0x00, sizeof peeraddr);
     socklen_t addrlen = static_cast<socklen_t>(sizeof peeraddr);
     if (::getpeername(sockfd, sockaddr_cast(&peeraddr), &addrlen) < 0) {
+        EXLE("sockets::get_peer_addr(%d) failed: %s", sockfd, strerror(errno));
     }
     return peeraddr;
 }
@@ -260,4 +282,6 @@ bool sockets::is_self_connect(int sockfd)
     } else {
         return false;
     }
+}
+
 }

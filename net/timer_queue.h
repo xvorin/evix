@@ -1,8 +1,8 @@
 #pragma once
 
-#include "base/timestamp.h"
-#include "net/callbacks.h"
-#include "net/channel.h"
+#include "evix/base/timestamp.h"
+#include "evix/net/callbacks.h"
+#include "evix/net/channel.h"
 
 #include <mutex>
 #include <set>
@@ -16,9 +16,6 @@ class TimerId;
 
 class TimerQueue {
 public:
-    TimerQueue(const TimerQueue&) = delete;
-    void operator=(const TimerQueue&) = delete;
-
     explicit TimerQueue(EventLoop* loop);
     ~TimerQueue();
 
@@ -26,10 +23,14 @@ public:
     void cancel(TimerId timerId);
 
 private:
-    typedef std::pair<Timestamp, Timer*> Entry;
-    typedef std::set<Entry> TimerList;
-    typedef std::pair<Timer*, int64_t> ActiveTimer;
-    typedef std::set<ActiveTimer> ActiveTimerSet;
+    TimerQueue(const TimerQueue&) = delete;
+    void operator=(const TimerQueue&) = delete;
+
+private:
+    using Entry = std::pair<Timestamp, Timer*>;
+    using TimerList = std::set<Entry>;
+    using ActiveTimer = std::pair<Timer*, int64_t>;
+    using ActiveTimerSet = std::set<ActiveTimer>;
     void add_timer_in_loop(Timer* timer);
     void cancel_in_loop(TimerId timerId);
     void handle_read();

@@ -1,10 +1,13 @@
-#include "net/connector.h"
+#include "evix/net/connector.h"
 
-#include "net/channel.h"
-#include "net/event_loop.h"
-#include "net/sockets_ops.h"
+#include "evix/net/channel.h"
+#include "evix/net/event_loop.h"
+#include "evix/net/sockets_ops.h"
+
+#include "evix/base/logging.h"
 
 #include <errno.h>
+#include <string.h>
 
 using namespace xvorin::evix;
 using namespace xvorin::evix::net;
@@ -59,7 +62,7 @@ void Connector::stop_in_loop()
 
 void Connector::connect()
 {
-    int sockfd = sockets::createNonblockingOrDie(server_addr_.family());
+    int sockfd = sockets::create_nonblocking_or_die(server_addr_.family());
     int ret = sockets::connect(sockfd, server_addr_.get_sock_addr());
     int saved_errno = (ret == 0) ? 0 : errno;
 
@@ -86,10 +89,14 @@ void Connector::connect()
     case EBADF:
     case EFAULT:
     case ENOTSOCK:
+        EXLE("Connector::connect() fatal connect error to %s: %s",
+            server_addr_.to_ip_port().c_str(), strerror(saved_errno));
         sockets::close(sockfd);
         break;
 
     default:
+        EXLE("Connector::connect() unexpected connect error to %s: %s",
+            server_addr_.to_ip_port().c_str(), strerror(saved_errno));
         sockets::close(sockfd);
         break;
     }
@@ -136,8 +143,10 @@ void Connector::handle_write()
         int err = sockets::get_socket_error(sockfd);
 
         if (err) {
+            EXLW("Connector::handle_write() SO_ERROR = %d %s", err, strerror(err));
             retry(sockfd);
         } else if (sockets::is_self_connect(sockfd)) {
+            EXLW("Connector::handle_write() self connect, retrying");
             retry(sockfd);
         } else {
             set_state(kConnected);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -53,9 +54,8 @@ public:
     bool take(T& front, double seconds)
     {
         std::unique_lock<std::mutex> lock(mutex_);
-        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::duration<double>(seconds));
-        if (not_empty_.wait_for(lock, ns) == std::cv_status::timeout) {
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(seconds));
+        if (!not_empty_.wait_for(lock, ns, [this] { return !queue_.empty(); })) {
             return false;
         }
         front = std::move(queue_.front());

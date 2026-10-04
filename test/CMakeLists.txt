@@ -1,58 +1,42 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(evix_test VERSION 1.0.0 LANGUAGES CXX)
+# This file works both standalone (configure test/ directly) and as a
+# subdirectory of the top-level build (add_subdirectory(test)).
+if(NOT TARGET evix)
+    project(evix_test VERSION 1.0.0 LANGUAGES CXX)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+    find_package(evix QUIET)
+    if(NOT evix_FOUND)
+        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_BINARY_DIR}/evix_build)
+    endif()
 
-# Force pthread for all targets
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
-
-# Find or build evix
-find_package(evix QUIET)
-if(NOT evix_FOUND)
-    # Build evix if not found
-    add_subdirectory(${CMAKE_SOURCE_DIR}/.. ${CMAKE_BINARY_DIR}/evix_build)
+    enable_testing()
 endif()
 
-# Find Threads
+# Threads::Threads is still linked below; the -pthread compile/link flag that
+# class_registrar.h needs (_REENTRANT) is propagated transitively from the evix
+# target, which carries it as a PUBLIC option (see top-level CMakeLists.txt).
 find_package(Threads REQUIRED)
 
-# Base tests executable
-add_executable(evix_test_base
-    test_base.cpp
+set(EVIX_TEST_TARGETS
+    evix_test_base
+    evix_test_net
+    evix_test_integration
 )
 
-target_link_libraries(evix_test_base
-    PRIVATE
-        evix
-        Threads::Threads
-)
+add_executable(evix_test_base test_base.cpp)
+add_executable(evix_test_net test_net.cpp)
+add_executable(evix_test_integration test_integration.cpp)
 
-target_include_directories(evix_test_base
-    PRIVATE
-        ${CMAKE_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/..
-)
-
-# Net tests executable
-add_executable(evix_test_net
-    test_net.cpp
-)
-
-target_link_libraries(evix_test_net
-    PRIVATE
-        evix
-        Threads::Threads
-)
-
-target_include_directories(evix_test_net
-    PRIVATE
-        ${CMAKE_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/..
-)
-
-# Enable all warnings for tests
-target_compile_options(evix_test_base PRIVATE -Wall -Wextra -g -O0)
-target_compile_options(evix_test_net PRIVATE -Wall -Wextra -g -O0)
+foreach(t IN LISTS EVIX_TEST_TARGETS)
+    target_link_libraries(${t} PRIVATE evix Threads::Threads)
+    target_include_directories(${t} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+    )
+    target_compile_options(${t} PRIVATE -Wall -Wextra -g)
+    add_test(NAME ${t} COMMAND ${t})
+endforeach()

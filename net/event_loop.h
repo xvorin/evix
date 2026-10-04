@@ -1,9 +1,9 @@
 #pragma once
 
-#include "base/current_thread.h"
-#include "base/timestamp.h"
-#include "net/callbacks.h"
-#include "net/timer_id.h"
+#include "evix/base/current_thread.h"
+#include "evix/base/timestamp.h"
+#include "evix/net/callbacks.h"
+#include "evix/net/timer_id.h"
 
 #include <any>
 #include <atomic>
@@ -14,22 +14,18 @@
 namespace xvorin::evix::net {
 
 class Channel;
-class Poller;
+class EPollPoller;
 class TimerQueue;
 
 class EventLoop {
 public:
-    typedef std::function<void()> Functor;
+    using Functor = std::function<void()>;
 
+public:
     EventLoop();
-
     ~EventLoop();
 
-    EventLoop(const EventLoop&) = delete;
-    void operator=(const EventLoop&) = delete;
-
     void loop();
-
     void quit();
 
     Timestamp poll_return_time() const
@@ -93,12 +89,16 @@ public:
     static EventLoop* get_event_loop_of_current_thread();
 
 private:
+    EventLoop(const EventLoop&) = delete;
+    void operator=(const EventLoop&) = delete;
+
+private:
     void abort_not_in_loop_thread();
     void handle_read();
     void do_pending_functors();
     void print_active_channels() const;
 
-    typedef std::vector<Channel*> ChannelList;
+    using ChannelList = std::vector<Channel*>;
 
     bool looping_;
     std::atomic<bool> quit_;
@@ -107,7 +107,7 @@ private:
     int64_t iteration_;
     const pid_t thread_id_;
     Timestamp poll_return_time_;
-    std::unique_ptr<Poller> poller_;
+    std::unique_ptr<EPollPoller> poller_;
     std::unique_ptr<TimerQueue> timer_queue_;
     int wakeup_fd_;
     std::unique_ptr<Channel> wakeup_channel_;

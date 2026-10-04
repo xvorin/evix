@@ -1,49 +1,20 @@
+#include "test_framework.h"
+
+#include "evix/net/buffer.h"
+#include "evix/net/endian.h"
+#include "evix/net/event_loop.h"
+#include "evix/net/inet_address.h"
+#include "evix/net/socket.h"
+#include "evix/net/timer.h"
+
 #include <atomic>
-#include <cassert>
 #include <chrono>
 #include <cstring>
-#include <future>
-#include <iostream>
-#include <sstream>
 #include <string>
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
-
-// Test macros
-#define TEST_ASSERT(cond, msg)                                                 \
-    do {                                                                       \
-        if (!(cond)) {                                                         \
-            std::cerr << "FAIL: " << msg << " (" << #cond << ")" << std::endl; \
-            return false;                                                      \
-        }                                                                      \
-    } while (0)
-
-#define TEST_CASE(name) bool test_##name()
-
-// Global test results
-static int g_passed = 0;
-static int g_failed = 0;
-
-#define RUN_TEST(name)                              \
-    do {                                            \
-        std::cout << "Running " << #name << "... "; \
-        if (test_##name()) {                        \
-            std::cout << "PASSED" << std::endl;     \
-            g_passed++;                             \
-        } else {                                    \
-            std::cout << "FAILED" << std::endl;     \
-            g_failed++;                             \
-        }                                           \
-    } while (0)
-
-#include "net/buffer.h"
-#include "net/endian.h"
-#include "net/event_loop.h"
-#include "net/inet_address.h"
-#include "net/socket.h"
-#include "net/timer.h"
 
 using namespace xvorin::evix;
 using namespace xvorin::evix::net;
@@ -183,6 +154,94 @@ TEST_CASE(buffer_find_crlf)
     return true;
 }
 
+TEST_CASE(buffer_grow)
+{
+    Buffer buf; // kInitialSize = 1024
+    std::string big(5000, 'x');
+    buf.append(big);
+    TEST_ASSERT(buf.readable_bytes() == 5000, "Buffer should grow to hold 5000 bytes");
+    TEST_ASSERT(buf.retrieve_all_as_string() == big, "Grown buffer content mismatch");
+    return true;
+}
+
+TEST_CASE(buffer_internal_move)
+{
+    // Exercise make_space's "move readable data to front" branch: fill, drain
+    // part (opening prependable room), then append again without growing.
+    Buffer buf(64);
+    buf.append(std::string(60, 'a'));
+    buf.retrieve(50); // reader_index advances, 10 readable left
+    size_t cap_before = buf.internal_capacity();
+    buf.append(std::string(40, 'b')); // should reuse space via internal move
+    TEST_ASSERT(buf.readable_bytes() == 50, "Should have 10 + 40 readable");
+    TEST_ASSERT(buf.internal_capacity() == cap_before, "Should not have reallocated");
+    std::string s = buf.retrieve_all_as_string();
+    TEST_ASSERT(s == std::string(10, 'a') + std::string(40, 'b'), "Internal move corrupted data");
+    return true;
+}
+
+TEST_CASE(buffer_prepend_payload)
+{
+    Buffer buf;
+    buf.append("world", 5);
+    buf.prepend_int32(42);
+    TEST_ASSERT(buf.readable_bytes() == 9, "Should have 9 bytes after prepend");
+    int32_t val = buf.read_int32();
+    TEST_ASSERT(val == 42, "prepend_int32 failed");
+    TEST_ASSERT(buf.retrieve_all_as_string() == "world", "Payload after prepend corrupted");
+    return true;
+}
+
+TEST_CASE(buffer_find_eol)
+{
+    Buffer buf;
+    buf.append("line1\nline2", 11);
+    const char* eol = buf.find_eol();
+    TEST_ASSERT(eol != nullptr, "find_eol should locate newline");
+    TEST_ASSERT(eol - buf.peek() == 5, "newline at position 5");
+    return true;
+}
+
+TEST_CASE(buffer_readfd_spill)
+{
+    // readFd must spill into the stack extrabuf when payload exceeds the
+    // buffer's writable space, then grow and keep all bytes in order.
+    int fds[2];
+    TEST_ASSERT(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0, "socketpair failed");
+
+    const size_t kBig = 100 * 1024; // > kInitialSize (1024) and > extrabuf? no, exercises spill
+    std::string payload(kBig, 'z');
+    size_t off = 0;
+    // Write in chunks from another thread so the socket buffer does not block.
+    std::thread writer([&]() {
+        while (off < payload.size()) {
+            ssize_t w = ::write(fds[1], payload.data() + off, payload.size() - off);
+            if (w <= 0) {
+                break;
+            }
+            off += static_cast<size_t>(w);
+        }
+        ::close(fds[1]);
+    });
+
+    Buffer buf;
+    std::string got;
+    while (got.size() < kBig) {
+        int err = 0;
+        ssize_t n = buf.readFd(fds[0], &err);
+        if (n <= 0) {
+            break;
+        }
+        got += buf.retrieve_all_as_string();
+    }
+    writer.join();
+    ::close(fds[0]);
+
+    TEST_ASSERT(got.size() == kBig, "readFd should recover all bytes");
+    TEST_ASSERT(got == payload, "readFd data mismatch");
+    return true;
+}
+
 // ============== Timer Tests ==============
 TEST_CASE(timer_basic)
 {
@@ -249,15 +308,17 @@ int main()
     RUN_TEST(buffer_retrieve_int);
     RUN_TEST(buffer_prepend);
     RUN_TEST(buffer_find_crlf);
+    RUN_TEST(buffer_grow);
+    RUN_TEST(buffer_internal_move);
+    RUN_TEST(buffer_prepend_payload);
+    RUN_TEST(buffer_find_eol);
+    RUN_TEST(buffer_readfd_spill);
 
     // Timer tests
     RUN_TEST(timer_basic);
     RUN_TEST(timer_repeat);
     RUN_TEST(timer_num_created);
 
-    std::cout << "========== SUMMARY ==========" << std::endl;
-    std::cout << "Passed: " << g_passed << std::endl;
-    std::cout << "Failed: " << g_failed << std::endl;
-
-    return g_failed > 0 ? 1 : 0;
+    TEST_SUMMARY();
+    return TEST_RESULT();
 }

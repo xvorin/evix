@@ -61,12 +61,8 @@ public:
         return Timestamp(static_cast<int64_t>(t) * kMicroSecondsPerSecond + microseconds);
     }
 
-    static Timestamp mktime(const unsigned int year0,
-        const unsigned int mon0,
-        const unsigned int day,
-        const unsigned int hour,
-        const unsigned int min,
-        const unsigned int sec)
+    static Timestamp mktime(const unsigned int year0, const unsigned int mon0, const unsigned int day,
+        const unsigned int hour, const unsigned int min, const unsigned int sec)
     {
         unsigned int mon = mon0, year = year0;
         if (0 >= (int)(mon -= 2)) {

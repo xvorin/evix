@@ -1,8 +1,8 @@
 #pragma once
 
-#include "net/buffer.h"
-#include "net/callbacks.h"
-#include "net/inet_address.h"
+#include "evix/net/buffer.h"
+#include "evix/net/callbacks.h"
+#include "evix/net/inet_address.h"
 
 #include <any>
 #include <memory>
@@ -17,10 +17,7 @@ class Socket;
 
 class TcpConnection : public std::enable_shared_from_this<TcpConnection> {
 public:
-    TcpConnection(EventLoop* loop,
-        const std::string& name,
-        int sockfd,
-        const InetAddress& localAddr,
+    TcpConnection(EventLoop* loop, const std::string& name, int sockfd, const InetAddress& localAddr,
         const InetAddress& peerAddr);
 
     ~TcpConnection();
@@ -131,12 +128,7 @@ public:
     void connect_destroyed();
 
 private:
-    enum StateE {
-        kDisconnected,
-        kConnecting,
-        kConnected,
-        kDisconnecting
-    };
+    enum StateE { kDisconnected, kConnecting, kConnected, kDisconnecting };
 
     void handle_read(Timestamp receive_time);
     void handle_write();
@@ -176,6 +168,6 @@ private:
     std::any context_;
 };
 
-typedef std::shared_ptr<TcpConnection> TcpConnectionPtr;
+using TcpConnectionPtr = std::shared_ptr<TcpConnection>;
 
 } // namespace xvorin::evix::net

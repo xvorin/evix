@@ -1,12 +1,12 @@
 #pragma once
 
-#include <string.h>
-
 #include <algorithm>
 #include <functional>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include <string.h>
 
 namespace xvorin::evix {
 
@@ -34,29 +34,23 @@ T str_to(const std::string& str)
 struct string_cmp_nocase {
     bool operator()(const std::string& lhs, const std::string& rhs) const
     {
-        auto p = lhs.begin();
-        auto p2 = rhs.begin();
-        while (p != lhs.end() && p2 != rhs.end()) {
-            if (toupper(*p) != toupper(*p2))
-                return (toupper(*p) < toupper(*p2) ? 1 : 0);
-            ++p;
-            ++p2;
-        }
-        return (lhs.size() == rhs.size()) ? 0 : ((lhs.size() < rhs.size()) ? 1 : 0);
+        return std::lexicographical_compare(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), [](char a, char b) {
+            return ::toupper(static_cast<unsigned char>(a)) < ::toupper(static_cast<unsigned char>(b));
+        });
     }
 };
 
 inline std::string to_lower(const std::string& str)
 {
     std::string t = str;
-    std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+    std::transform(t.begin(), t.end(), t.begin(), [](unsigned char c) { return static_cast<char>(::tolower(c)); });
     return t;
 }
 
 inline std::string to_upper(const std::string& str)
 {
     std::string t = str;
-    std::transform(t.begin(), t.end(), t.begin(), ::toupper);
+    std::transform(t.begin(), t.end(), t.begin(), [](unsigned char c) { return static_cast<char>(::toupper(c)); });
     return t;
 }
 
@@ -103,19 +97,27 @@ inline std::string erase(std::string& str, char c = ' ')
 
 inline std::string replace_all(std::string& str, const char* delim, const char* s = "")
 {
-    size_t len = strlen(delim);
-    size_t pos = str.find(delim);
-    while (pos != std::string::npos) {
-        str.replace(pos, len, s);
-        pos = str.find(delim, pos);
+    if (!delim || !s) {
+        return str; // 或 assert/throw
+    }
+
+    std::string d(delim);
+    std::string r(s);
+
+    if (d.empty()) {
+        return str; // 空分隔符无意义，避免死循环
+    }
+
+    size_t pos = 0;
+    while ((pos = str.find(d, pos)) != std::string::npos) {
+        str.replace(pos, d.size(), r);
+        pos += r.size(); // 跳过替换后的内容，避免 s 中含 delim 时死循环
     }
     return str;
 }
 
-inline void split(const std::string& str,
-    std::vector<std::string>& result,
-    const std::string& delim = " ",
-    bool insertEmpty = false)
+inline void split(
+    const std::string& str, std::vector<std::string>& result, const std::string& delim = " ", bool insertEmpty = false)
 {
     if (str.empty() || delim.empty()) {
         return;
@@ -128,19 +130,19 @@ inline void split(const std::string& str,
         if (!temp.empty()) {
             result.push_back(temp);
         } else if (insertEmpty) {
-            result.push_back("");
+            result.emplace_back("");
         }
         if (subend == str.end())
             break;
-        substart = subend + delim.size();
+        substart = subend + static_cast<std::string::const_iterator::difference_type>(delim.size());
     }
 }
 
 template <typename SequenceSequenceT, typename Range1T>
 inline typename SequenceSequenceT::value_type join(const SequenceSequenceT& Input, const Range1T& Separator)
 {
-    typedef typename SequenceSequenceT::value_type ResultT;
-    typedef typename SequenceSequenceT::const_iterator InputIteratorT;
+    using ResultT = typename SequenceSequenceT::value_type;
+    using InputIteratorT = typename SequenceSequenceT::const_iterator;
     InputIteratorT itBegin = Input.begin();
     InputIteratorT itEnd = Input.end();
     ResultT Result;
@@ -156,12 +158,11 @@ inline typename SequenceSequenceT::value_type join(const SequenceSequenceT& Inpu
 }
 
 template <typename SequenceSequenceT, typename Range1T, typename PredicateT>
-inline typename SequenceSequenceT::value_type join_if(const SequenceSequenceT& Input,
-    const Range1T& Separator,
-    PredicateT Pred)
+inline typename SequenceSequenceT::value_type join_if(
+    const SequenceSequenceT& Input, const Range1T& Separator, PredicateT Pred)
 {
-    typedef typename SequenceSequenceT::value_type ResultT;
-    typedef typename SequenceSequenceT::const_iterator InputIteratorT;
+    using ResultT = typename SequenceSequenceT::value_type;
+    using InputIteratorT = typename SequenceSequenceT::const_iterator;
     InputIteratorT itBegin = Input.begin();
     InputIteratorT itEnd = Input.end();
     ResultT Result;

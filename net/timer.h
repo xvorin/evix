@@ -1,20 +1,14 @@
 #pragma once
 
-#include "base/timestamp.h"
-#include "net/callbacks.h"
+#include "evix/base/timestamp.h"
+#include "evix/net/callbacks.h"
 
 #include <atomic>
 
-namespace xvorin::evix {
-
-namespace net {
+namespace xvorin::evix::net {
 
 class Timer {
 public:
-    Timer(const Timer&) = delete;
-
-    void operator=(const Timer&) = delete;
-
     Timer(TimerCallback cb, Timestamp when, double interval)
         : callback_(std::move(cb))
         , expiration_(when)
@@ -52,6 +46,10 @@ public:
     }
 
 private:
+    Timer(const Timer&) = delete;
+    void operator=(const Timer&) = delete;
+
+private:
     const TimerCallback callback_;
     Timestamp expiration_;
     const double interval_;
@@ -61,4 +59,3 @@ private:
 };
 
 } // namespace xvorin::evix::net
-} // namespace xvorin::evix

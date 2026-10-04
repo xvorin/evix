@@ -1,7 +1,7 @@
 #pragma once
 
-#include "net/channel.h"
-#include "net/socket.h"
+#include "evix/net/channel.h"
+#include "evix/net/socket.h"
 
 #include <functional>
 
@@ -12,11 +12,9 @@ class InetAddress;
 
 class Acceptor {
 public:
-    Acceptor(const Acceptor&) = delete;
-    void operator=(const Acceptor&) = delete;
+    using NewConnectionCallback = std::function<void(int sockfd, const InetAddress&)>;
 
-    typedef std::function<void(int sockfd, const InetAddress&)> NewConnectionCallback;
-
+public:
     Acceptor(EventLoop* loop, const InetAddress& listenAddr, bool reuseport);
     ~Acceptor();
 
@@ -31,6 +29,10 @@ public:
     {
         return listening_;
     }
+
+private:
+    Acceptor(const Acceptor&) = delete;
+    void operator=(const Acceptor&) = delete;
 
 private:
     void handle_read();

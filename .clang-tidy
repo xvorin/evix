@@ -1,0 +1,27 @@
+# evix 静态检查 (clang-tidy)
+#
+# 关注三类高价值问题: 潜在 bug(bugprone/analyzer)、性能(多余拷贝/低效写法),
+# 以及部分现代化改写; 另开 cppcoreguidelines-pro-type-member-init 捕捉未初始化成员
+# (本仓库曾因 TcpServer::started_ 未初始化踩过坑)。关掉与本仓库风格冲突或噪声过大的项。
+# 本仓库刻意不做全库一次性整改, 建议配合 clang-tidy --warnings-as-errors 仅对增量生效。
+Checks: >
+  bugprone-*,
+  performance-*,
+  clang-analyzer-*,
+  misc-*,
+  modernize-use-override,
+  modernize-use-nullptr,
+  modernize-use-emplace,
+  modernize-make-shared,
+  modernize-make-unique,
+  cppcoreguidelines-pro-type-member-init,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  -misc-non-private-member-variables-in-classes,
+  -misc-no-recursion,
+  -misc-include-cleaner,
+  -clang-analyzer-optin.cplusplus.VirtualCall
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '^.*/evix/(base|net)/.*\.h$'
+FormatStyle: file

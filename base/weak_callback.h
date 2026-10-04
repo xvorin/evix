@@ -34,8 +34,8 @@ WeakCallback<CLASS, ARGS...> makeWeakCallback(const std::shared_ptr<CLASS>& obje
 }
 
 template <typename CLASS, typename... ARGS>
-WeakCallback<CLASS, ARGS...> makeWeakCallback(const std::shared_ptr<CLASS>& object,
-    void (CLASS::*function)(ARGS...) const)
+WeakCallback<CLASS, ARGS...> makeWeakCallback(
+    const std::shared_ptr<CLASS>& object, void (CLASS::*function)(ARGS...) const)
 {
     return WeakCallback<CLASS, ARGS...>(object, function);
 }

@@ -1,18 +1,18 @@
-#include "net/poller/epoll_poller.h"
+#include "evix/net/epoll_poller.h"
 
-#include "net/channel.h"
+#include "evix/base/logging.h"
+#include "evix/net/channel.h"
+
+#include <cstddef>
+#include <cstring>
 
 #include <assert.h>
-#include <cstddef>
 #include <errno.h>
 #include <poll.h>
 #include <sys/epoll.h>
 #include <unistd.h>
 
-#include <cstring>
-
 using namespace xvorin::evix;
-
 using namespace xvorin::evix::net;
 
 static_assert(EPOLLIN == POLLIN, "epoll uses same flag values as poll");
@@ -25,25 +25,31 @@ static_assert(EPOLLHUP == POLLHUP, "epoll uses same flag values as poll");
 namespace {
 
 const int kNew = -1;
-
 const int kAdded = 1;
-
 const int kDeleted = 2;
 
 }
 
 EPollPoller::EPollPoller(EventLoop* loop)
-    : Poller(loop)
+    : owner_loop_(loop)
     , epollfd_(::epoll_create1(EPOLL_CLOEXEC))
     , events_(kInitEventListSize)
 {
     if (epollfd_ < 0) {
+        EXLF("epoll_create1() failed: %s", strerror(errno));
     }
 }
 
 EPollPoller::~EPollPoller()
 {
     ::close(epollfd_);
+}
+
+bool EPollPoller::has_channel(Channel* channel) const
+{
+    assert_in_loop_thread();
+    ChannelMap::const_iterator it = channels_.find(channel->fd());
+    return it != channels_.end() && it->second == channel;
 }
 
 Timestamp EPollPoller::poll(int timeout_ms, ChannelList* active_channels)
@@ -61,6 +67,7 @@ Timestamp EPollPoller::poll(int timeout_ms, ChannelList* active_channels)
     } else {
         if (saved_errno != EINTR) {
             errno = saved_errno;
+            EXLE("EPollPoller::poll() epoll_wait failed: %s", strerror(saved_errno));
         }
     }
     return now;
@@ -85,7 +92,7 @@ void EPollPoller::fill_active_channels(int num_events, ChannelList* active_chann
 
 void EPollPoller::update_channel(Channel* channel)
 {
-    Poller::assert_in_loop_thread();
+    assert_in_loop_thread();
     const int index = channel->index();
 
     if (index == kNew || index == kDeleted) {
@@ -117,7 +124,7 @@ void EPollPoller::update_channel(Channel* channel)
 
 void EPollPoller::remove_channel(Channel* channel)
 {
-    Poller::assert_in_loop_thread();
+    assert_in_loop_thread();
     int fd = channel->fd();
     assert(channels_.find(fd) != channels_.end());
     assert(channels_[fd] == channel);
@@ -144,7 +151,9 @@ void EPollPoller::update(int operation, Channel* channel)
 
     if (::epoll_ctl(epollfd_, operation, fd, &event) < 0) {
         if (operation == EPOLL_CTL_DEL) {
+            EXLE("epoll_ctl DEL fd=%d failed: %s", fd, strerror(errno));
         } else {
+            EXLF("epoll_ctl %s fd=%d failed: %s", operation_to_string(operation), fd, strerror(errno));
         }
     }
 }

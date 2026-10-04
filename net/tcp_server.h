@@ -1,9 +1,10 @@
 #pragma once
 
-#include "net/tcp_connection.h"
+#include "evix/net/tcp_connection.h"
 
 #include <atomic>
 #include <map>
+#include <memory>
 #include <string>
 
 namespace xvorin::evix::net {
@@ -19,22 +20,17 @@ class EventLoopThreadPool;
 ///
 class TcpServer {
 public:
-    TcpServer(const TcpServer&) = delete;
-
-    void operator=(const TcpServer&) = delete;
-
-    typedef std::function<void(EventLoop*)> ThreadInitCallback;
+    using ThreadInitCallback = std::function<void(EventLoop*)>;
 
     enum Option {
         kNoReusePort,
         kReusePort,
     };
 
+public:
     // TcpServer(EventLoop* loop, const InetAddress& listenAddr);
-    TcpServer(EventLoop* loop,
-        const InetAddress& listen_addr,
-        const std::string& nameArg,
-        Option option = kNoReusePort);
+    TcpServer(
+        EventLoop* loop, const InetAddress& listen_addr, const std::string& nameArg, Option option = kNoReusePort);
 
     ~TcpServer(); // force out-line dtor, for std::unique_ptr members.
 
@@ -70,11 +66,11 @@ public:
         threadInitCallback_ = cb;
     }
 
-    /// valid after calling start()
-    /*std::shared_ptr<EventLoopThreadPool> threadPool()
-        {
-            return threadPool_;
-        }*/
+    /// Valid after calling start().
+    std::shared_ptr<EventLoopThreadPool> thread_pool()
+    {
+        return thread_pool_;
+    }
 
     /// Starts the server if it's not listening.
     ///
@@ -105,7 +101,9 @@ public:
 
     void send(const std::string& msg);
 
-    void send_mock(const std::string& msg, int index);
+private:
+    TcpServer(const TcpServer&) = delete;
+    void operator=(const TcpServer&) = delete;
 
 private:
     /// Not thread safe, but in loop
@@ -117,15 +115,15 @@ private:
     /// Not thread safe, but in loop
     void remove_connection_in_loop(const TcpConnectionPtr& conn);
 
-    typedef std::map<std::string, TcpConnectionPtr> ConnectionMap;
+    using ConnectionMap = std::map<std::string, TcpConnectionPtr>;
 
     EventLoop* loop_; // the acceptor loop
 
     const std::string ip_port_;
     const std::string name_;
     std::unique_ptr<Acceptor> acceptor_; // avoid revealing Acceptor
+    std::shared_ptr<EventLoopThreadPool> thread_pool_;
 
-    // std::shared_ptr<EventLoopThreadPool> threadPool_;
     ConnectionCallback connectionCallback_;
     MessageCallback messageCallback_;
     WriteCompleteCallback writeCompleteCallback_;
@@ -134,7 +132,6 @@ private:
     // always in loop thread
     int next_conn_id_;
     ConnectionMap connections_;
-    // xvorin::evix::net::EventLoopThread eventLoopThread_;
 };
 
 } // namespace xvorin::evix::net

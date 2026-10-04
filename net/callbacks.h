@@ -1,6 +1,6 @@
 #pragma once
 
-#include "base/timestamp.h"
+#include "evix/base/timestamp.h"
 
 #include <cassert>
 #include <functional>
@@ -36,15 +36,15 @@ namespace net {
 class Buffer;
 class TcpConnection;
 
-typedef std::shared_ptr<TcpConnection> TcpConnectionPtr;
-typedef std::function<void()> TimerCallback;
+using TcpConnectionPtr = std::shared_ptr<TcpConnection>;
+using TimerCallback = std::function<void()>;
 
-typedef std::function<void(const TcpConnectionPtr&)> ConnectionCallback;
-typedef std::function<void(const TcpConnectionPtr&)> CloseCallback;
-typedef std::function<void(const TcpConnectionPtr&)> WriteCompleteCallback;
+using ConnectionCallback = std::function<void(const TcpConnectionPtr&)>;
+using CloseCallback = std::function<void(const TcpConnectionPtr&)>;
+using WriteCompleteCallback = std::function<void(const TcpConnectionPtr&)>;
 
-typedef std::function<void(const TcpConnectionPtr&, size_t)> HighWaterMarkCallback;
-typedef std::function<void(const TcpConnectionPtr&, Buffer*, Timestamp)> MessageCallback;
+using HighWaterMarkCallback = std::function<void(const TcpConnectionPtr&, size_t)>;
+using MessageCallback = std::function<void(const TcpConnectionPtr&, Buffer*, Timestamp)>;
 
 void defaultConnectionCallback(const TcpConnectionPtr& conn);
 void defaultMessageCallback(const TcpConnectionPtr& conn, Buffer* buffer, Timestamp receive_time);

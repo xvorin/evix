@@ -1,12 +1,13 @@
 #pragma once
 
+#include <array>
+#include <atomic>
+#include <cinttypes>
+#include <mutex>
+
 #include <assert.h>
 #include <pthread.h>
 #include <stdlib.h>
-
-#include <array>
-#include <cinttypes>
-#include <mutex>
 
 namespace xvorin::evix {
 
@@ -27,9 +28,7 @@ struct has_no_destroy {
 template <typename T, size_t N = 1>
 class Singleton {
 public:
-    Singleton(const Singleton&) = delete;
-
-    void operator=(const Singleton&) = delete;
+    using element_type = T;
 
     template <size_t M = 0, typename... Args>
     static T& instance(Args&&... args)
@@ -42,11 +41,9 @@ public:
             }
             instance_num_++;
         });
-        assert(instance_array_[M] != NULL);
+        assert(instance_array_[M] != nullptr);
         return *instance_array_[M];
     }
-
-    using element_type = T;
 
     static size_t instanceNum()
     {
@@ -60,24 +57,26 @@ public:
 
 private:
     Singleton() = delete;
-
     ~Singleton() = delete;
+
+    Singleton(const Singleton&) = delete;
+    void operator=(const Singleton&) = delete;
 
     template <size_t M>
     static void destroy()
     {
-        typedef char T_must_be_complete_type[sizeof(T) == 0 ? -1 : 1];
+        using T_must_be_complete_type = char[sizeof(T) == 0 ? -1 : 1];
         T_must_be_complete_type dummy;
         (void)dummy;
         delete instance_array_[M];
-        instance_array_[M] = NULL;
+        instance_array_[M] = nullptr;
         instance_num_--;
     }
 
     static_assert(N > 0 && N < 256, "Instance Number Must be Bigger than 1, Lesser than 256!");
 
 private:
-    static size_t instance_num_;
+    static std::atomic<size_t> instance_num_;
     static std::array<T*, N> instance_array_;
     static std::array<std::once_flag, N> once_array_;
 };
@@ -87,6 +86,6 @@ std::array<T*, N> Singleton<T, N>::instance_array_;
 template <typename T, size_t N>
 std::array<std::once_flag, N> Singleton<T, N>::once_array_;
 template <typename T, size_t N>
-size_t Singleton<T, N>::instance_num_ = 0;
+std::atomic<size_t> Singleton<T, N>::instance_num_ { 0 };
 
 } // namespace xvorin::evix

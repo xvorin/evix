@@ -1,51 +1,26 @@
-#include <cassert>
+#include "test_framework.h"
+
+#include "evix/base/base64.h"
+#include "evix/base/blocking_queue.h"
+#include "evix/base/class_registrar.h"
+#include "evix/base/count_down_latch.h"
+#include "evix/base/current_thread.h"
+#include "evix/base/hex2string.h"
+#include "evix/base/process_info.h"
+#include "evix/base/signal_slot.h"
+#include "evix/base/singleton.h"
+#include "evix/base/string_util.h"
+#include "evix/base/thread_pool.h"
+#include "evix/base/timestamp.h"
+#include "evix/base/weak_callback.h"
+
+#include <atomic>
 #include <chrono>
 #include <cstring>
-#include <iostream>
-#include <sstream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
-
-// Test macros
-#define TEST_ASSERT(cond, msg)                                                 \
-    do {                                                                       \
-        if (!(cond)) {                                                         \
-            std::cerr << "FAIL: " << msg << " (" << #cond << ")" << std::endl; \
-            return false;                                                      \
-        }                                                                      \
-    } while (0)
-
-#define TEST_CASE(name) bool test_##name()
-
-// Global test results
-static int g_passed = 0;
-static int g_failed = 0;
-
-#define RUN_TEST(name)                              \
-    do {                                            \
-        std::cout << "Running " << #name << "... "; \
-        if (test_##name()) {                        \
-            std::cout << "PASSED" << std::endl;     \
-            g_passed++;                             \
-        } else {                                    \
-            std::cout << "FAILED" << std::endl;     \
-            g_failed++;                             \
-        }                                           \
-    } while (0)
-
-#include "base/base64.h"
-#include "base/blocking_queue.h"
-#include "base/class_registrar.h"
-#include "base/count_down_latch.h"
-#include "base/current_thread.h"
-#include "base/hex2string.h"
-#include "base/process_info.h"
-#include "base/signal_slot.h"
-#include "base/singleton.h"
-#include "base/string_util.h"
-#include "base/timestamp.h"
-#include "base/weak_callback.h"
 
 using namespace xvorin::evix;
 
@@ -352,7 +327,10 @@ TEST_CASE(weak_callback_basic)
 {
     struct TestClass {
         int value = 42;
-        void getValue() { (void)value; }
+        void getValue()
+        {
+            (void)value;
+        }
     };
 
     auto obj = std::make_shared<TestClass>();
@@ -433,7 +411,10 @@ TEST_CASE(class_registrar_basic)
 
     struct Derived : Base {
         int value = 42;
-        int getValue() const override { return value; }
+        int getValue() const override
+        {
+            return value;
+        }
     };
 
     // Register
@@ -448,6 +429,264 @@ TEST_CASE(class_registrar_basic)
     auto obj2 = xvorin::evix::ClassRegistrar<Base>::get_instance("test");
     TEST_ASSERT(obj2 != nullptr, "Get instance failed");
 
+    return true;
+}
+
+// ============== Base64 / Hex negative & edge cases ==============
+TEST_CASE(base64_decode_invalid)
+{
+    // '!' is not a base64 alphabet character.
+    std::string decoded = xvorin::evix::base64_decode(std::string("abc!"));
+    TEST_ASSERT(decoded.empty(), "Invalid base64 should decode to empty");
+    return true;
+}
+
+TEST_CASE(base64_roundtrip_binary)
+{
+    std::string original;
+    for (int i = 0; i < 256; ++i) {
+        original.push_back(static_cast<char>(i));
+    }
+    std::string encoded = xvorin::evix::base64_encode(original);
+    std::string decoded = xvorin::evix::base64_decode(encoded);
+    TEST_ASSERT(decoded == original, "Base64 binary roundtrip failed");
+    return true;
+}
+
+TEST_CASE(hex_roundtrip_binary)
+{
+    std::string original;
+    for (int i = 0; i < 256; ++i) {
+        original.push_back(static_cast<char>(i));
+    }
+    std::string encoded = xvorin::evix::encode_to_hex_string(original);
+    TEST_ASSERT(encoded.size() == original.size() * 2, "Hex length should double");
+    std::string decoded = xvorin::evix::decode_hex_string(encoded);
+    TEST_ASSERT(decoded == original, "Hex binary roundtrip failed");
+    return true;
+}
+
+// ============== Blocking Queue advanced ==============
+TEST_CASE(blocking_queue_mpsc)
+{
+    xvorin::evix::BlockingQueue<int> queue;
+    const int kProducers = 4;
+    const int kPerProducer = 1000;
+    std::vector<std::thread> producers;
+    for (int p = 0; p < kProducers; ++p) {
+        producers.emplace_back([&queue, kPerProducer]() {
+            for (int i = 0; i < kPerProducer; ++i) {
+                queue.put(i);
+            }
+        });
+    }
+
+    long long sum = 0;
+    for (int i = 0; i < kProducers * kPerProducer; ++i) {
+        sum += queue.take();
+    }
+    for (auto& t : producers) {
+        t.join();
+    }
+
+    const long long expected = (long long)kProducers * (kPerProducer - 1) * kPerProducer / 2;
+    TEST_ASSERT(sum == expected, "MPSC queue lost or corrupted items");
+    TEST_ASSERT(queue.size() == 0, "Queue should be drained");
+    return true;
+}
+
+TEST_CASE(blocking_queue_timed_take)
+{
+    xvorin::evix::BlockingQueue<int> queue;
+    int out = -1;
+
+    // Empty queue: timed take must time out and leave out untouched.
+    bool got = queue.take(out, 0.05);
+    TEST_ASSERT(!got, "Timed take on empty queue should time out");
+
+    queue.put(99);
+    got = queue.take(out, 1.0);
+    TEST_ASSERT(got, "Timed take should succeed when item present");
+    TEST_ASSERT(out == 99, "Timed take returned wrong value");
+    return true;
+}
+
+TEST_CASE(blocking_queue_move_only)
+{
+    xvorin::evix::BlockingQueue<std::unique_ptr<int>> queue;
+    queue.put(std::make_unique<int>(7));
+    auto p = queue.take();
+    TEST_ASSERT(p && *p == 7, "Move-only queue element corrupted");
+    return true;
+}
+
+TEST_CASE(blocking_queue_drop_return)
+{
+    xvorin::evix::BlockingQueue<int> queue(1);
+    bool d1 = queue.put(1);
+    bool d2 = queue.put(2); // overflows, drops oldest
+    TEST_ASSERT(!d1, "First put should not drop");
+    TEST_ASSERT(d2, "Second put should report a drop");
+    TEST_ASSERT(queue.size() == 1, "Queue should stay at limit");
+    TEST_ASSERT(queue.drops() == 1, "Drop count should be 1");
+    TEST_ASSERT(queue.take() == 2, "Oldest element should have been dropped");
+    return true;
+}
+
+// ============== Count Down Latch multithread ==============
+TEST_CASE(count_down_latch_threads)
+{
+    xvorin::evix::CountDownLatch latch(3);
+    std::atomic<int> ran { 0 };
+    std::vector<std::thread> workers;
+    for (int i = 0; i < 3; ++i) {
+        workers.emplace_back([&]() {
+            ran++;
+            latch.count_down();
+        });
+    }
+    latch.wait();
+    TEST_ASSERT(latch.get_count() == 0, "Latch should reach zero");
+    TEST_ASSERT(ran.load() == 3, "All workers should have run before wait returned");
+    for (auto& t : workers) {
+        t.join();
+    }
+    return true;
+}
+
+// ============== Signal/Slot advanced ==============
+TEST_CASE(signal_slot_multi)
+{
+    xvorin::evix::Signal<void(int)> signal;
+    int a = 0;
+    int b = 0;
+    auto c1 = signal.connect([&](int x) { a += x; });
+    auto c2 = signal.connect([&](int x) { b += x * 2; });
+    TEST_ASSERT(signal.count() == 2, "Signal should have 2 slots");
+    signal.call(3);
+    TEST_ASSERT(a == 3 && b == 6, "Both slots should fire");
+    return true;
+}
+
+TEST_CASE(signal_slot_tied_lifetime)
+{
+    xvorin::evix::Signal<void(int)> signal;
+    int calls = 0;
+    auto owner = std::make_shared<int>(0);
+    auto conn = signal.connect([&](int) { calls++; }, owner);
+
+    signal.call(1);
+    TEST_ASSERT(calls == 1, "Tied slot should fire while owner alive");
+
+    owner.reset(); // owner gone: tied slot must be skipped
+    signal.call(1);
+    TEST_ASSERT(calls == 1, "Tied slot must not fire after owner destroyed");
+    return true;
+}
+
+TEST_CASE(signal_slot_auto_disconnect)
+{
+    xvorin::evix::Signal<void(int)> signal;
+    int calls = 0;
+    {
+        auto conn = signal.connect([&](int) { calls++; });
+        signal.call(1);
+        TEST_ASSERT(calls == 1, "Slot should fire in scope");
+    }
+    // Slot handle dropped -> weak ref expires, cleaned up on next call.
+    signal.call(1);
+    TEST_ASSERT(calls == 1, "Expired slot must not fire");
+    return true;
+}
+
+// ============== Singleton advanced ==============
+TEST_CASE(singleton_multi_slot)
+{
+    struct S {
+        int v = 0;
+    };
+    auto& a = xvorin::evix::Singleton<S, 2>::instance<0>();
+    auto& b = xvorin::evix::Singleton<S, 2>::instance<1>();
+    a.v = 11;
+    b.v = 22;
+    TEST_ASSERT(&a != &b, "Distinct slots must be distinct instances");
+    TEST_ASSERT((xvorin::evix::Singleton<S, 2>::instance<0>().v == 11), "Slot 0 should persist");
+    TEST_ASSERT((xvorin::evix::Singleton<S, 2>::instance<1>().v == 22), "Slot 1 should persist");
+    return true;
+}
+
+TEST_CASE(singleton_thread_safe_init)
+{
+    struct S {
+        int v = 123;
+    };
+    std::vector<std::thread> threads;
+    std::vector<S*> ptrs(8, nullptr);
+    for (int i = 0; i < 8; ++i) {
+        threads.emplace_back([i, &ptrs]() {
+            ptrs[i] = &xvorin::evix::Singleton<S>::instance();
+        });
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+    for (int i = 1; i < 8; ++i) {
+        TEST_ASSERT(ptrs[i] == ptrs[0], "All threads must observe the same instance");
+    }
+    return true;
+}
+
+// ============== Thread Pool ==============
+TEST_CASE(thread_pool_runs_all_tasks)
+{
+    xvorin::evix::ThreadPool pool("test");
+    pool.start(4);
+    std::atomic<int> counter { 0 };
+    const int kTasks = 2000;
+    for (int i = 0; i < kTasks; ++i) {
+        pool.run([&counter] { counter.fetch_add(1); });
+    }
+    pool.stop();
+    TEST_ASSERT(counter.load() == kTasks, "Thread pool must run every task exactly once");
+    return true;
+}
+
+TEST_CASE(thread_pool_inline_when_no_threads)
+{
+    xvorin::evix::ThreadPool pool("inline");
+    // start() never called -> run() executes synchronously in the caller.
+    int value = 0;
+    pool.run([&value] { value = 42; });
+    TEST_ASSERT(value == 42, "With no workers, run() must execute inline");
+    return true;
+}
+
+TEST_CASE(thread_pool_thread_init_callback)
+{
+    xvorin::evix::ThreadPool pool("init");
+    std::atomic<int> inits { 0 };
+    pool.set_thread_init_callback([&inits] { inits.fetch_add(1); });
+    pool.start(3);
+    pool.stop();
+    TEST_ASSERT(inits.load() == 3, "Thread init callback must run once per worker");
+    return true;
+}
+
+TEST_CASE(thread_pool_bounded_backpressure)
+{
+    xvorin::evix::ThreadPool pool("bounded");
+    pool.set_max_queue_size(4);
+    pool.start(2);
+    std::atomic<int> done { 0 };
+    const int kTasks = 200;
+    for (int i = 0; i < kTasks; ++i) {
+        pool.run([&done] {
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+            done.fetch_add(1);
+        });
+    }
+    pool.stop();
+    TEST_ASSERT(done.load() == kTasks, "All tasks must complete under backpressure");
     return true;
 }
 
@@ -518,9 +757,35 @@ int main()
     // Class registrar tests
     RUN_TEST(class_registrar_basic);
 
-    std::cout << "========== SUMMARY ==========" << std::endl;
-    std::cout << "Passed: " << g_passed << std::endl;
-    std::cout << "Failed: " << g_failed << std::endl;
+    // Base64 / Hex negative & edge cases
+    RUN_TEST(base64_decode_invalid);
+    RUN_TEST(base64_roundtrip_binary);
+    RUN_TEST(hex_roundtrip_binary);
 
-    return g_failed > 0 ? 1 : 0;
+    // Blocking queue advanced
+    RUN_TEST(blocking_queue_mpsc);
+    RUN_TEST(blocking_queue_timed_take);
+    RUN_TEST(blocking_queue_move_only);
+    RUN_TEST(blocking_queue_drop_return);
+
+    // Count down latch multithread
+    RUN_TEST(count_down_latch_threads);
+
+    // Signal/Slot advanced
+    RUN_TEST(signal_slot_multi);
+    RUN_TEST(signal_slot_tied_lifetime);
+    RUN_TEST(signal_slot_auto_disconnect);
+
+    // Singleton advanced
+    RUN_TEST(singleton_multi_slot);
+    RUN_TEST(singleton_thread_safe_init);
+
+    // Thread pool
+    RUN_TEST(thread_pool_runs_all_tasks);
+    RUN_TEST(thread_pool_inline_when_no_threads);
+    RUN_TEST(thread_pool_thread_init_callback);
+    RUN_TEST(thread_pool_bounded_backpressure);
+
+    TEST_SUMMARY();
+    return TEST_RESULT();
 }

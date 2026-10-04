@@ -1,8 +1,6 @@
 #pragma once
 
-namespace xvorin::evix {
-
-namespace net {
+namespace xvorin::evix::net {
 
 class Timer;
 
@@ -30,4 +28,3 @@ private:
 };
 
 } // namespace xvorin::evix::net
-} // namespace xvorin::evix

@@ -8,9 +8,6 @@ class InetAddress;
 
 class Socket {
 public:
-    Socket(const Socket&) = delete;
-    void operator=(const Socket&) = delete;
-
     explicit Socket(int sockfd)
         : sockfd_(sockfd)
     {
@@ -26,7 +23,6 @@ public:
 
     // return true if success.
     bool get_tcp_info(struct tcp_info*) const;
-
     bool get_tcp_info_string(char* buf, int len) const;
 
     /// abort if address in use
@@ -62,6 +58,10 @@ public:
     /// Enable/disable SO_KEEPALIVE
     ///
     void set_keep_alive(bool on);
+
+private:
+    Socket(const Socket&) = delete;
+    void operator=(const Socket&) = delete;
 
 private:
     const int sockfd_;

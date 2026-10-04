@@ -1,7 +1,8 @@
-#include "net/socket.h"
+#include "evix/net/socket.h"
 
-#include "net/inet_address.h"
-#include "net/sockets_ops.h"
+#include "evix/base/logging.h"
+#include "evix/net/inet_address.h"
+#include "evix/net/sockets_ops.h"
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -28,10 +29,11 @@ bool Socket::get_tcp_info_string(char* buf, int len) const
     bool ok = get_tcp_info(&tcpi);
 
     if (ok) {
-        snprintf(buf, len, "unrecovered=%u "
-                           "rto=%u ato=%u snd_mss=%u rcv_mss=%u "
-                           "lost=%u retrans=%u rtt=%u rttvar=%u "
-                           "sshthresh=%u cwnd=%u total_retrans=%u",
+        snprintf(buf, len,
+            "unrecovered=%u "
+            "rto=%u ato=%u snd_mss=%u rcv_mss=%u "
+            "lost=%u retrans=%u rtt=%u rttvar=%u "
+            "sshthresh=%u cwnd=%u total_retrans=%u",
             tcpi.tcpi_retransmits, // Number of unrecovered [RTO] timeouts
             tcpi.tcpi_rto, // Retransmit timeout in usec
             tcpi.tcpi_ato, // Predicted tick of soft clock in usec
@@ -39,7 +41,8 @@ bool Socket::get_tcp_info_string(char* buf, int len) const
             tcpi.tcpi_retrans, // Retransmitted packets out
             tcpi.tcpi_rtt, // Smoothed round trip time in usec
             tcpi.tcpi_rttvar, // Medium deviation
-            tcpi.tcpi_snd_ssthresh, tcpi.tcpi_snd_cwnd, tcpi.tcpi_total_retrans); // Total retransmits for entire connection
+            tcpi.tcpi_snd_ssthresh, tcpi.tcpi_snd_cwnd,
+            tcpi.tcpi_total_retrans); // Total retransmits for entire connection
     }
 
     return ok;
@@ -91,10 +94,11 @@ void Socket::set_reuse_port(bool on)
     int optval = on ? 1 : 0;
     int ret = ::setsockopt(sockfd_, SOL_SOCKET, SO_REUSEPORT, &optval, static_cast<socklen_t>(sizeof optval));
     if (ret < 0 && on) {
+        EXLE("Socket::set_reuse_port(%d) SO_REUSEPORT failed", sockfd_);
     }
 #else
     if (on) {
-        LOG_ERROR << "SO_REUSEPORT is not supported.";
+        EXLE("SO_REUSEPORT is not supported.");
     }
 #endif
 }

@@ -24,10 +24,10 @@ struct SignalImpl {
 
     void copy_on_write()
     {
-        if (!slots_.unique()) {
+        if (slots_.use_count() != 1) {
             slots_ = std::make_shared<SlotList>(*slots_);
         }
-        assert(slots_.unique());
+        assert(slots_.use_count() == 1);
     }
 
     void cleanup()
@@ -102,9 +102,6 @@ public:
     {
     }
 
-    Signal(const Signal&) = delete;
-    void operator=(const Signal&) = delete;
-
     ~Signal() = default;
 
     Slot connect(Callback&& func)
@@ -132,7 +129,7 @@ public:
         return retval;
     }
 
-    void call(ARGS&&... args)
+    void call(const ARGS&... args)
     {
         SignalImpl& impl(*impl_);
         std::shared_ptr<typename SignalImpl::SlotList> slots;
@@ -156,6 +153,10 @@ public:
             }
         }
     }
+
+private:
+    Signal(const Signal&) = delete;
+    void operator=(const Signal&) = delete;
 
 private:
     void add(const std::shared_ptr<SlotImpl>& slot)

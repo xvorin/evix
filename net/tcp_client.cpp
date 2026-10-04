@@ -1,18 +1,13 @@
-#include "net/tcp_client.h"
+#include "evix/net/tcp_client.h"
 
-#include "net/connector.h"
-#include "net/event_loop.h"
-#include "net/sockets_ops.h"
+#include "evix/net/connector.h"
+#include "evix/net/event_loop.h"
+#include "evix/net/sockets_ops.h"
 
 #include <stdio.h>
 
 using namespace xvorin::evix;
-
 using namespace xvorin::evix::net;
-
-namespace xvorin::evix {
-
-namespace net {
 
 namespace detail {
 
@@ -25,9 +20,7 @@ void remove_connector(const ConnectorPtr&)
 {
 }
 
-} // namespace xvorin::evix::detail
-} // namespace xvorin::evix::net
-} // namespace muduo
+} // namespace detail
 
 TcpClient::TcpClient(EventLoop* loop, const InetAddress& serverAddr, const std::string& nameArg)
     : loop_(loop)

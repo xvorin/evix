@@ -1,12 +1,16 @@
-#include "net/event_loop.h"
+#include "evix/net/event_loop.h"
 
-#include "net/channel.h"
-#include "net/poller.h"
-#include "net/sockets_ops.h"
-#include "net/timer_queue.h"
+#include "evix/base/logging.h"
+#include "evix/net/channel.h"
+#include "evix/net/epoll_poller.h"
+#include "evix/net/sockets_ops.h"
+#include "evix/net/timer_queue.h"
 
 #include <algorithm>
+
+#include <errno.h>
 #include <signal.h>
+#include <string.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
 
@@ -15,15 +19,14 @@ using namespace xvorin::evix::net;
 
 namespace {
 
-__thread EventLoop* t_loop_in_this_thread = nullptr;
-
+thread_local EventLoop* t_loop_in_this_thread = nullptr;
 const int k_poll_time_ms = 10000;
 
 int create_eventfd()
 {
     int evtfd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (evtfd < 0) {
-        abort();
+        EXLF("eventfd() failed: %s", strerror(errno));
     }
     return evtfd;
 }
@@ -56,13 +59,15 @@ EventLoop::EventLoop()
     , calling_pending_functors_(false)
     , iteration_(0)
     , thread_id_(CurrentThread::tid())
-    , poller_(Poller::new_default_poller(this))
+    , poller_(new EPollPoller(this))
     , timer_queue_(new TimerQueue(this))
     , wakeup_fd_(create_eventfd())
     , wakeup_channel_(new Channel(this, wakeup_fd_))
     , current_active_channel_(nullptr)
 {
     if (t_loop_in_this_thread) {
+        EXLF("another EventLoop %p already exists in this thread %d", static_cast<void*>(t_loop_in_this_thread),
+            thread_id_);
     } else {
         t_loop_in_this_thread = this;
     }
@@ -76,7 +81,9 @@ EventLoop::~EventLoop()
     wakeup_channel_->disable_all();
     wakeup_channel_->remove();
     ::close(wakeup_fd_);
-    t_loop_in_this_thread = nullptr;
+    if (t_loop_in_this_thread == this) {
+        t_loop_in_this_thread = nullptr;
+    }
 }
 
 void EventLoop::loop()
@@ -173,8 +180,7 @@ void EventLoop::remove_channel(Channel* channel)
     assert(channel->owner_loop() == this);
     assert_in_loop_thread();
     if (event_handling_) {
-        assert(
-            current_active_channel_ == channel
+        assert(current_active_channel_ == channel
             || std::find(active_channels_.begin(), active_channels_.end(), channel) == active_channels_.end());
     }
     poller_->remove_channel(channel);
@@ -189,6 +195,8 @@ bool EventLoop::has_channel(Channel* channel)
 
 void EventLoop::abort_not_in_loop_thread()
 {
+    EXLF("EventLoop %p was created in thread %d, but accessed from thread %d", static_cast<void*>(this), thread_id_,
+        CurrentThread::tid());
 }
 
 void EventLoop::wakeup()
@@ -196,6 +204,7 @@ void EventLoop::wakeup()
     uint64_t one = 1;
     ssize_t n = sockets::write(wakeup_fd_, &one, sizeof one);
     if (n != sizeof one) {
+        EXLE("EventLoop::wakeup() wrote %zd bytes instead of 8", n);
     }
 }
 
@@ -204,6 +213,7 @@ void EventLoop::handle_read()
     uint64_t one = 1;
     ssize_t n = sockets::read(wakeup_fd_, &one, sizeof one);
     if (n != sizeof one) {
+        EXLE("EventLoop::handle_read() read %zd bytes instead of 8", n);
     }
 }
 

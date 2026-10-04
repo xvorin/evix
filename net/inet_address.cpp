@@ -1,7 +1,7 @@
-#include "net/inet_address.h"
+#include "evix/net/inet_address.h"
 
-#include "net/endian.h"
-#include "net/sockets_ops.h"
+#include "evix/net/endian.h"
+#include "evix/net/sockets_ops.h"
 
 #include <assert.h>
 #include <netdb.h>
@@ -17,8 +17,7 @@ static const in_addr_t kInaddrLoopback = INADDR_LOOPBACK;
 using namespace xvorin::evix;
 using namespace xvorin::evix::net;
 
-static_assert(sizeof(InetAddress) == sizeof(struct sockaddr_in6),
-    "InetAddress is same size as sockaddr_in6");
+static_assert(sizeof(InetAddress) == sizeof(struct sockaddr_in6), "InetAddress is same size as sockaddr_in6");
 
 InetAddress::InetAddress(uint16_t port, bool loopbackOnly, bool ipv6)
 {
@@ -73,23 +72,22 @@ uint16_t InetAddress::to_port() const
     return sockets::networkToHost16(portNetEndian());
 }
 
-static __thread char t_resolve_buffer[64 * 1024];
+static thread_local char t_resolve_buffer[64 * 1024];
 
 bool InetAddress::resolve(const std::string& hostname, InetAddress* out)
 {
-    assert(out != NULL);
-    struct hostent hent;
-    struct hostent* he = NULL;
+    assert(out != nullptr);
+    struct hostent hent = {};
+    struct hostent* he = nullptr;
     int herrno = 0;
     memset(&hent, 0x00, sizeof(hent));
     int ret = gethostbyname_r(hostname.c_str(), &hent, t_resolve_buffer, sizeof t_resolve_buffer, &he, &herrno);
-    if (ret == 0 && he != NULL) {
+    if (ret == 0 && he != nullptr) {
         assert(he->h_addrtype == AF_INET && he->h_length == sizeof(uint32_t));
         out->addr_.sin_addr = *reinterpret_cast<struct in_addr*>(he->h_addr);
         return true;
     } else {
-        if (ret) {
-        }
+        if (ret) { }
         return false;
     }
 }

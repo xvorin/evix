@@ -1,4 +1,4 @@
-#include "base/string_util.h"
+#include "evix/base/string_util.h"
 
 #include <stdarg.h>
 
@@ -8,21 +8,26 @@ namespace xvorin::evix {
 
 size_t string_format_append_impl(std::string& dst, const char* format, va_list ap)
 {
-    size_t bufsz = 1024;
-    int result = 0;
+    // Measure the formatted length first (vsnprintf into a null buffer), then
+    // format straight into the destination string's own heap storage. The old
+    // implementation sized a stack VLA (`char buffer[bufsz]`) to the output
+    // length, which overflowed the stack for large results -- and crashed even
+    // on modest results when running on a small worker-thread stack.
     va_list backup_ap;
-    while (true) {
-        char buffer[bufsz];
-        va_copy(backup_ap, ap);
-        result = vsnprintf(buffer, sizeof(buffer), format, backup_ap);
-        va_end(backup_ap);
-        if (result < static_cast<int>(bufsz)) {
-            result = (result <= 0) ? 0 : (dst.append(buffer, result), result);
-            break;
-        }
-        bufsz = result + 1;
+    va_copy(backup_ap, ap);
+    const int needed = vsnprintf(nullptr, 0, format, backup_ap);
+    va_end(backup_ap);
+
+    if (needed <= 0) {
+        return 0;
     }
-    return result;
+
+    const size_t old_size = dst.size();
+    dst.resize(old_size + static_cast<size_t>(needed));
+    // vsnprintf writes `needed` chars plus a trailing '\0'; the '\0' lands on
+    // dst[old_size + needed], the terminator slot std::string keeps writable.
+    vsnprintf(&dst[old_size], static_cast<size_t>(needed) + 1, format, ap);
+    return static_cast<size_t>(needed);
 }
 
 size_t string_format_append(std::string& dst, const char* format, ...)

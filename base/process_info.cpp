@@ -1,10 +1,12 @@
-#include "base/process_info.h"
-#include "base/current_thread.h"
+#include "evix/base/process_info.h"
+
+#include "evix/base/current_thread.h"
 
 #include <algorithm>
+#include <fstream>
+
 #include <assert.h>
 #include <dirent.h>
-#include <fstream>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +16,7 @@
 
 namespace xvorin::evix::detail {
 
-__thread int t_num_opened_files = 0;
+thread_local int t_num_opened_files = 0;
 
 int fd_dir_filter(const struct dirent* d)
 {
@@ -24,7 +26,7 @@ int fd_dir_filter(const struct dirent* d)
     return 0;
 }
 
-__thread std::vector<pid_t>* t_pids = NULL;
+thread_local std::vector<pid_t>* t_pids = nullptr;
 
 int task_dir_filter(const struct dirent* d)
 {
@@ -36,9 +38,14 @@ int task_dir_filter(const struct dirent* d)
 
 int scan_dir(const char* dirpath, int (*filter)(const struct dirent*))
 {
-    struct dirent** namelist = NULL;
+    struct dirent** namelist = nullptr;
     int result = ::scandir(dirpath, &namelist, filter, alphasort);
-    assert(namelist == NULL);
+    if (namelist != nullptr) {
+        for (int i = 0; i < result; ++i) {
+            ::free(namelist[i]);
+        }
+        ::free(namelist);
+    }
     return result;
 }
 
@@ -72,8 +79,8 @@ uid_t ProcessInfo::uid()
 
 std::string ProcessInfo::username()
 {
-    struct passwd pwd;
-    struct passwd* result = NULL;
+    struct passwd pwd = {};
+    struct passwd* result = nullptr;
     char buf[8192];
     const char* name = "unknownuser";
     getpwuid_r(uid(), &pwd, buf, sizeof buf, &result);
@@ -203,12 +210,14 @@ int ProcessInfo::opened_files()
 {
     t_num_opened_files = 0;
     scan_dir("/proc/self/fd", fd_dir_filter);
-    return t_num_opened_files;
+    // scandir() holds an open fd on /proc/self/fd while enumerating; that fd itself
+    // shows up as a numeric entry and gets counted, so discount it.
+    return t_num_opened_files > 0 ? t_num_opened_files - 1 : 0;
 }
 
 int ProcessInfo::max_open_files()
 {
-    struct rlimit rl;
+    struct rlimit rl = {};
     if (::getrlimit(RLIMIT_NOFILE, &rl)) {
         return opened_files();
     } else {
@@ -219,7 +228,7 @@ int ProcessInfo::max_open_files()
 ProcessInfo::CpuTime ProcessInfo::cpu_time()
 {
     ProcessInfo::CpuTime t;
-    struct tms tms;
+    struct tms tms = {};
     if (::times(&tms) >= 0) {
         const double hz = static_cast<double>(clock_ticks_per_second());
         t.user_seconds = static_cast<double>(tms.tms_utime) / hz;
@@ -244,7 +253,7 @@ std::vector<pid_t> ProcessInfo::threads()
     std::vector<pid_t> result;
     t_pids = &result;
     scan_dir("/proc/self/task", task_dir_filter);
-    t_pids = NULL;
+    t_pids = nullptr;
     std::sort(result.begin(), result.end());
     return result;
 }

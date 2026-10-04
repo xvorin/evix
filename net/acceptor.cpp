@@ -1,11 +1,13 @@
-#include "net/acceptor.h"
+#include "evix/net/acceptor.h"
 
-#include "net/event_loop.h"
-#include "net/inet_address.h"
-#include "net/sockets_ops.h"
+#include "evix/base/logging.h"
+#include "evix/net/event_loop.h"
+#include "evix/net/inet_address.h"
+#include "evix/net/sockets_ops.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <string.h>
 #include <unistd.h>
 
 using namespace xvorin::evix;
@@ -13,7 +15,7 @@ using namespace xvorin::evix::net;
 
 Acceptor::Acceptor(EventLoop* loop, const InetAddress& listenAddr, bool reuseport)
     : loop_(loop)
-    , accept_socket_(sockets::createNonblockingOrDie(listenAddr.family()))
+    , accept_socket_(sockets::create_nonblocking_or_die(listenAddr.family()))
     , accept_channel_(loop, accept_socket_.fd())
     , listening_(false)
     , idle_fd_(::open("/dev/null", O_RDONLY | O_CLOEXEC))
@@ -22,8 +24,7 @@ Acceptor::Acceptor(EventLoop* loop, const InetAddress& listenAddr, bool reusepor
     accept_socket_.set_reuse_addr(true);
     accept_socket_.set_reuse_port(reuseport);
     accept_socket_.bind_address(listenAddr);
-    accept_channel_.set_read_callback(
-        std::bind(&Acceptor::handle_read, this));
+    accept_channel_.set_read_callback(std::bind(&Acceptor::handle_read, this));
 }
 
 Acceptor::~Acceptor()
@@ -55,9 +56,12 @@ void Acceptor::handle_read()
             sockets::close(connfd);
         }
     } else {
+        EXLE("Acceptor::handle_read() accept failed: %s", strerror(errno));
+        // Read the section named "The special problem of
+        // accept()ing when you can't" in libev's doc.
         if (errno == EMFILE) {
             ::close(idle_fd_);
-            idle_fd_ = ::accept(accept_socket_.fd(), NULL, NULL);
+            idle_fd_ = ::accept(accept_socket_.fd(), nullptr, nullptr);
             ::close(idle_fd_);
             idle_fd_ = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
         }

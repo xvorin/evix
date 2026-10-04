@@ -5,29 +5,20 @@
  *      Author: chewenyao
  */
 
-#include "net/event_loop_manager.h"
+#include "evix/net/event_loop_manager.h"
 
-#include "base/count_down_latch.h"
-#include "net/event_loop.h"
+#include "evix/base/count_down_latch.h"
+#include "evix/base/logging.h"
+#include "evix/net/event_loop.h"
 
-#include <cxxabi.h>
-#include <execinfo.h>
-#include <limits.h>
+#include <memory>
 #include <mutex>
-#include <set>
+
+#include <limits.h>
 #include <signal.h>
-#include <sstream>
 #include <string.h>
 #include <sys/resource.h>
 #include <unistd.h>
-
-#define AFLLOG(lvl, fmt, ...)
-#define gLogT(...) AFLLOG(0, __VA_ARGS__)
-#define gLogD(...) AFLLOG(1, __VA_ARGS__)
-#define gLogI(...) AFLLOG(2, __VA_ARGS__)
-#define gLogW(...) AFLLOG(3, __VA_ARGS__)
-#define gLogE(...) AFLLOG(4, __VA_ARGS__)
-#define gLogF(...) printf(__VA_ARGS__) // AFLLOG(5, __VA_ARGS__)
 
 using namespace xvorin::evix::net;
 
@@ -60,13 +51,24 @@ EventLoopManager::EventLoopManager(bool main_loop)
 {
     auto& ctx = get_context();
 
-    std::call_once(ctx.s_InitOnce, [&]() {
-        if (main_loop) {
-            ctx.s_MainLoop = std::make_shared<xvorin::evix::net::EventLoop>();
+    // Only a main_loop=true construction may initialize the process-wide main
+    // loop. Keeping the main_loop test outside call_once means an earlier
+    // main_loop=false construction no longer consumes s_InitOnce and silently
+    // prevents a later main_loop=true one from ever creating s_MainLoop.
+    if (main_loop) {
+        std::call_once(ctx.s_InitOnce, [&]() {
+            // The process-wide main loop lives for the whole process and runs on
+            // the thread that calls run(). Give it a no-op deleter so it is never
+            // destroyed during C++ static teardown: ~EventLoop asserts it runs on
+            // the loop's own thread, but static destructors run on whatever thread
+            // happens to call exit(), which would abort the process. The OS
+            // reclaims its fds and memory at exit, so leaking it here is safe.
+            ctx.s_MainLoop = std::shared_ptr<xvorin::evix::net::EventLoop>(
+                new xvorin::evix::net::EventLoop(), [](xvorin::evix::net::EventLoop* p) { p->quit(); });
             std::lock_guard<std::mutex> guard(ctx.s_Thread2EventLoopMapLock);
             ctx.s_Thread2EventLoopMap[pthread_self()] = ctx.s_MainLoop;
-        }
-    });
+        });
+    }
 }
 
 EventLoopManager::~EventLoopManager()
@@ -100,14 +102,21 @@ void EventLoopManager::quit()
         }
     }
 
+    // Drop the name->loop entries so a concurrent get_event_loop(name) cannot
+    // hand back a loop whose loop() we just asked to return.
+    {
+        std::lock_guard<std::mutex> guard(ctx.s_Name2EventLoopMapLock);
+        ctx.s_Name2EventLoopMap.clear();
+    }
+
     if (ctx.s_MainLoop) {
         ctx.s_MainLoop->quit();
     }
     ctx.s_MainLoopRunning = false;
 }
 
-int EventLoopManager::createCustomAttributes(const std::string& name,
-    EvmThreadCreateType unique, int stack_size, int policy, int priority, std::vector<bool> affinity)
+int EventLoopManager::createCustomAttributes(const std::string& name, EvmThreadCreateType unique, int stack_size,
+    int policy, int priority, std::vector<bool> affinity)
 {
     if (name.empty()) {
         return -1;
@@ -115,7 +124,13 @@ int EventLoopManager::createCustomAttributes(const std::string& name,
 
     stack_size *= 1024; /* stack_size KBytes */
     stack_size = std::max((int)PTHREAD_STACK_MIN, stack_size);
-    stack_size = std::min(stack_size, (int)get_upper_limit(RLIMIT_STACK, 8192 * 1024));
+    // Clamp in the size_t domain: get_upper_limit() may return RLIM_INFINITY
+    // (~0UL), and casting that to int yields a negative value that std::min
+    // would wrongly select as the stack size.
+    size_t stack_limit = get_upper_limit(RLIMIT_STACK, 8192 * 1024);
+    if (stack_limit < static_cast<size_t>(stack_size)) {
+        stack_size = static_cast<int>(stack_limit);
+    }
 
     if (SCHED_FIFO != policy && SCHED_RR != policy && SCHED_OTHER != policy) {
         return -2;
@@ -139,13 +154,12 @@ int EventLoopManager::createCustomAttributes(const std::string& name,
         std::lock_guard<std::mutex> guard(ctx.s_ModuleThreadAttrsLock);
         ctx.s_ModuleThreadAttrs[name] = attr;
     }
-    gLogT("createCustomAttributes for %s(%d,%d,%d,%d)", name.c_str(),
-        (int)attr.unique, attr.stack_size, attr.policy, attr.priority);
+    EXLT("createCustomAttributes for %s(%d,%d,%d,%d)", name.c_str(), (int)attr.unique, attr.stack_size, attr.policy,
+        attr.priority);
     return 0;
 }
 
-std::shared_ptr<xvorin::evix::net::EventLoop> EventLoopManager::get_event_loop(
-    const std::string& name)
+std::shared_ptr<xvorin::evix::net::EventLoop> EventLoopManager::get_event_loop(const std::string& name)
 {
     std::shared_ptr<xvorin::evix::net::EventLoop> retval = nullptr;
     ThreadAttribute attr;
@@ -163,11 +177,11 @@ std::shared_ptr<xvorin::evix::net::EventLoop> EventLoopManager::get_event_loop(
     if (xvorin::evix::net::EvmMulti == attr.unique) {
         retval = create_event_loop(attr);
         if (!retval) {
-            gLogW("Uses main loop for %s's request!", name.c_str());
+            EXLW("Uses main loop for %s's request!", name.c_str());
             assert(ctx.s_MainLoop);
             retval = ctx.s_MainLoop;
         }
-        gLogT("thread create done for %s!", name.c_str());
+        EXLT("thread create done for %s!", name.c_str());
         return retval;
     }
 
@@ -178,18 +192,18 @@ std::shared_ptr<xvorin::evix::net::EventLoop> EventLoopManager::get_event_loop(
     }
 
     if (retval) {
-        gLogT("unique thread had been created for %s!", name.c_str());
+        EXLT("unique thread had been created for %s!", name.c_str());
         return retval;
     }
 
     retval = create_event_loop(attr);
     if (!retval) {
-        gLogW("Uses main loop for %s's unique request!", name.c_str());
+        EXLW("Uses main loop for %s's unique request!", name.c_str());
         assert(ctx.s_MainLoop);
         retval = ctx.s_MainLoop;
     }
     ctx.s_Name2EventLoopMap[name] = retval;
-    gLogT("unique thread create done for %s!", name.c_str());
+    EXLT("unique thread create done for %s!", name.c_str());
     return retval;
 }
 
@@ -208,14 +222,13 @@ std::shared_ptr<xvorin::evix::net::EventLoop> EventLoopManager::get_current_even
 
 using namespace xvorin::evix::net;
 
-std::shared_ptr<EventLoop> EventLoopManager::create_event_loop(
-    const ThreadAttribute& attr)
+std::shared_ptr<EventLoop> EventLoopManager::create_event_loop(const ThreadAttribute& attr)
 {
     std::shared_ptr<EventLoop> retval = nullptr;
     CountDownLatch cdl(1);
     void* args[] = { &cdl, &retval };
     pthread_t tid;
-    struct sched_param param;
+    struct sched_param param = {};
     pthread_attr_t pAttr;
     memset(&pAttr, 0x00, sizeof(pAttr));
     pthread_attr_init(&pAttr);
@@ -231,33 +244,33 @@ std::shared_ptr<EventLoop> EventLoopManager::create_event_loop(
 
     auto& ctx = get_context();
     int retry = ctx.PTHREAD_CREATE_RETRY_TIME;
-    while (1) {
+    while (true) {
         int retcode = pthread_create(&tid, &pAttr, create_event_loop_detail, args);
-        if (0 != retcode && (EAGAIN == errno || EWOULDBLOCK == errno)
-            && retry-- > 0) {
-            gLogW("pthread_create failure because of EAGAIN, retry(%d/%d)!",
-                PTHREAD_CREATE_RETRY_TIME - retry,
-                PTHREAD_CREATE_RETRY_TIME);
+        if (0 != retcode && retry-- > 0) {
+            EXLW("pthread_create failure(%s), retry(%d/%d)!", strerror(retcode), ctx.PTHREAD_CREATE_RETRY_TIME - retry,
+                ctx.PTHREAD_CREATE_RETRY_TIME);
             usleep(1 * 1000);
             continue;
         }
 
+        pthread_attr_destroy(&pAttr);
+
         if (0 != retcode) {
-            gLogE("pthread_create error, reason:%s!", strerror(retcode));
+            EXLE("pthread_create error, reason:%s!", strerror(retcode));
             return nullptr;
         }
 
         if (!attr.affinity.empty()) {
             cpu_set_t mask;
             CPU_ZERO(&mask);
-            for (size_t i = 0; i < attr.affinity.size(); i++) {
+            for (size_t i = 0; i < attr.affinity.size() && i < CPU_SETSIZE; i++) {
                 if (attr.affinity[i]) {
                     CPU_SET(i, &mask);
                 }
             }
             retcode = pthread_setaffinity_np(tid, sizeof(mask), &mask);
             if (0 != retcode) {
-                gLogW("pthread_setaffinity_np error, reason:%s!", strerror(retcode));
+                EXLW("pthread_setaffinity_np error, reason:%s!", strerror(retcode));
             }
         }
         break;
@@ -267,40 +280,42 @@ std::shared_ptr<EventLoop> EventLoopManager::create_event_loop(
     cdl.wait();
     assert(retval);
 
-    if (0 != pthread_detach(tid)) {
-        pthread_attr_destroy(&pAttr);
-        gLogW("pthread_detach(tid=%lu) error! reason:%s", tid, strerror(errno));
+    int detach_ret = pthread_detach(tid);
+    if (0 != detach_ret) {
+        EXLW("pthread_detach(tid=%lu) error! reason:%s", tid, strerror(detach_ret));
     }
-    gLogT("New thread(tid=%lu) created!", tid);
+    EXLT("New thread(tid=%lu) created!", tid);
     return retval;
 }
 
 void* EventLoopManager::create_event_loop_detail(void* arg)
 {
     pthread_t tid = pthread_self();
-    CountDownLatch* cdl = reinterpret_cast<CountDownLatch*>(((char**)arg)[0]);
-    std::shared_ptr<EventLoop>* retloop = reinterpret_cast<std::shared_ptr<EventLoop>*>(((char**)arg)[1]);
-    assert(cdl && retloop);
+    CountDownLatch& cdl = *(reinterpret_cast<CountDownLatch*>(((char**)arg)[0]));
+    std::shared_ptr<EventLoop>& retloop = *(reinterpret_cast<std::shared_ptr<EventLoop>*>(((char**)arg)[1]));
+    // assert(cdl && retloop);
 
-    auto loop = std::make_shared<EventLoop>();
-    *retloop = loop;
+    // The EventLoop itself lives on this worker thread's stack, so it is both created
+    // and destroyed here -- ~EventLoop()'s assert_in_loop_thread() always holds.
+    EventLoop loop;
+    // clang-format off
+    retloop = std::shared_ptr<EventLoop>(&loop, [](EventLoop* p) { p->quit(); });
+    std::weak_ptr<EventLoop> loop_guard = retloop;
+    // clang-format on
 
     auto& ctx = get_context();
     {
         std::lock_guard<std::mutex> guard(ctx.s_Thread2EventLoopMapLock);
-        ctx.s_Thread2EventLoopMap[tid] = loop;
+        ctx.s_Thread2EventLoopMap[tid] = retloop;
     }
 
     /* notify main thread going */
-    cdl->count_down();
+    cdl.count_down();
 
-    /* detect if idle, and quit this thread */
-    auto timer = loop->run_every(5, [&]() {   if(loop.use_count() <= 1) loop->quit(); });
     install_trace_back_signals();
 
     /* working */
-    loop->loop();
-    loop->cancel(timer);
+    loop.loop();
 
     {
         std::lock_guard<std::mutex> guard(ctx.s_Thread2EventLoopMapLock);
@@ -309,64 +324,23 @@ void* EventLoopManager::create_event_loop_detail(void* arg)
             ctx.s_Thread2EventLoopMap.erase(iter);
         }
     }
-    gLogT("thread %lu canceled!", tid);
+
+    while (!loop_guard.expired()) {
+        usleep(1000);
+    }
+
+    EXLT("thread %lu exited!", tid);
     return nullptr;
 }
 
 void EventLoopManager::install_trace_back_signals()
 {
-    // std::set<int> tobeCaptured = { SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV,
-    //     SIGSYS, SIGSTKFLT, SIGXCPU, SIGXFSZ };
-    // for (auto s : tobeCaptured) {
-    //     signal(s, traceBack);
-    // }
     signal(SIGPIPE, SIG_IGN);
-}
-
-void EventLoopManager::trace_back(int signo)
-{
-    static const int len = 256;
-    void* buffer[len];
-    int nptrs = ::backtrace(buffer, len);
-    char** strings = ::backtrace_symbols(buffer, nptrs);
-
-    if (!strings) {
-        return;
-    }
-
-    std::stringstream ss;
-    for (int i = 0; i < nptrs; ++i) {
-        const std::string line(strings[i]); // ./test(_ZN6detail12c_do_nothingEfi+0x44) [0x401974]
-        const std::string unmangle = demangle_name(line);
-        ss << (unmangle.empty() ? line : unmangle) << std::endl;
-    }
-    free(strings);
-    gLogF("exit by signal %d \n%s", signo, ss.str().c_str());
-    _exit(signo);
-}
-
-std::string EventLoopManager::demangle_name(const std::string& mangled)
-{
-    std::string retval;
-    int status = 0;
-    static const size_t max_size = 2048;
-    char temp[max_size];
-    char unmangled[max_size];
-    size_t buf_size = max_size;
-
-    if (1 != sscanf(mangled.c_str(), "%*[^(]%*[^_]%127[^)+]", temp)) {
-        return retval;
-    }
-
-    if ((nullptr != abi::__cxa_demangle(temp, unmangled, &buf_size, &status)) && (0 == status)) {
-        retval.assign(unmangled, buf_size);
-    }
-    return retval;
 }
 
 size_t EventLoopManager::get_upper_limit(int type, size_t dft)
 {
-    struct rlimit rlim;
+    struct rlimit rlim = {};
     if (0 != getrlimit(type, &rlim)) {
         return dft;
     }

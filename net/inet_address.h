@@ -1,9 +1,9 @@
 #pragma once
 
-#include <netinet/in.h>
-
 #include <cstring>
 #include <string>
+
+#include <netinet/in.h>
 
 namespace xvorin::evix::net {
 

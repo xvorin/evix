@@ -1,6 +1,6 @@
-#include "net/buffer.h"
+#include "evix/net/buffer.h"
 
-#include "net/sockets_ops.h"
+#include "evix/net/sockets_ops.h"
 
 #include <errno.h>
 #include <sys/uio.h>
@@ -38,9 +38,5 @@ ssize_t Buffer::readFd(int fd, int* savedErrno)
         append(extrabuf, n - writable);
     }
 
-    // if (n == writable + sizeof extrabuf)
-    // {
-    //   goto line_30;
-    // }
     return n;
 }

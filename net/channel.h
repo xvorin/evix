@@ -1,6 +1,6 @@
 #pragma once
 
-#include "base/timestamp.h"
+#include "evix/base/timestamp.h"
 
 #include <functional>
 #include <memory>
@@ -12,12 +12,10 @@ class EventLoop;
 
 class Channel {
 public:
-    Channel(const Channel&) = delete;
-    void operator=(const Channel&) = delete;
+    using EventCallback = std::function<void()>;
+    using ReadEventCallback = std::function<void(Timestamp)>;
 
-    typedef std::function<void()> EventCallback;
-    typedef std::function<void(Timestamp)> ReadEventCallback;
-
+public:
     Channel(EventLoop* loop, int fd);
     ~Channel();
 
@@ -129,6 +127,10 @@ public:
     }
 
     void remove();
+
+private:
+    Channel(const Channel&) = delete;
+    void operator=(const Channel&) = delete;
 
 private:
     static std::string events_to_string(int fd, int ev);

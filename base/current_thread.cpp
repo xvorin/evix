@@ -1,5 +1,6 @@
-#include "base/current_thread.h"
-#include "base/timestamp.h"
+#include "evix/base/current_thread.h"
+
+#include "evix/base/timestamp.h"
 
 #include <cxxabi.h>
 #include <execinfo.h>
@@ -12,10 +13,10 @@ using namespace xvorin::evix;
 
 namespace detail {
 
-__thread int t_cached_tid = 0;
-__thread char t_tid_string[32];
-__thread int t_tid_string_length = 6;
-__thread const char* t_thread_name = "unknown";
+thread_local int t_cached_tid = 0;
+thread_local char t_tid_string[32];
+thread_local int t_tid_string_length = 6;
+thread_local const char* t_thread_name = "unknown";
 
 } // namespace detail
 
@@ -46,7 +47,8 @@ void CurrentThread::cache_tid()
 {
     if (detail::t_cached_tid == 0) {
         detail::t_cached_tid = static_cast<pid_t>(::syscall(SYS_gettid));
-        detail::t_tid_string_length = snprintf(detail::t_tid_string, sizeof detail::t_tid_string, "%5d ", detail::t_cached_tid);
+        detail::t_tid_string_length
+            = snprintf(detail::t_tid_string, sizeof detail::t_tid_string, "%5d ", detail::t_cached_tid);
     }
 }
 
@@ -60,7 +62,7 @@ void CurrentThread::sleep_usec(int64_t usec)
     struct timespec ts = { 0, 0 };
     ts.tv_sec = static_cast<time_t>(usec / Timestamp::kMicroSecondsPerSecond);
     ts.tv_nsec = static_cast<long>(usec % Timestamp::kMicroSecondsPerSecond * 1000);
-    ::nanosleep(&ts, NULL);
+    ::nanosleep(&ts, nullptr);
 }
 
 std::string CurrentThread::stack_trace(bool demangle)
@@ -90,8 +92,12 @@ std::string CurrentThread::stack_trace(bool demangle)
                     int status = 0;
                     char* ret = abi::__cxa_demangle(left_par + 1, demangled, &len, &status);
                     *plus = '+';
-                    if (status == 0) {
+                    // __cxa_demangle may realloc(demangled); always adopt the returned
+                    // buffer when non-null so the final free() targets live memory.
+                    if (ret != nullptr) {
                         demangled = ret;
+                    }
+                    if (status == 0) {
                         stack.append(strings[i], left_par + 1);
                         stack.append(demangled);
                         stack.append(plus);

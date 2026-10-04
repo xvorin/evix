@@ -4,6 +4,7 @@
 
 namespace xvorin::evix {
 
+// clang-format off
 const static char g_hex_num[256] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -15,14 +16,17 @@ const static char g_hex_num[256] = {
 };
 
 const static char g_hex_str[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', '\0' };
+// clang-format on
 
 inline std::string decode_hex_string(const std::string& hexstr)
 {
     std::string buf;
-    size_t index = 0;
-    while (hexstr[index] != '\0') {
-        buf += static_cast<char>((g_hex_num[(int)hexstr[index]] << 4) | g_hex_num[(int)hexstr[index + 1]]);
-        index += 2;
+    const size_t len = hexstr.size();
+    // Consume two nibbles per byte; a dangling final nibble (odd length) is
+    // ignored rather than read past the end of the string.
+    for (size_t index = 0; index + 1 < len; index += 2) {
+        buf += static_cast<char>(
+            (g_hex_num[(unsigned char)hexstr[index]] << 4) | g_hex_num[(unsigned char)hexstr[index + 1]]);
     }
     return buf;
 }

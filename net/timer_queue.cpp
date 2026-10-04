@@ -1,22 +1,25 @@
-#include "net/timer_queue.h"
+#include "evix/net/timer_queue.h"
 
-#include "net/event_loop.h"
-#include "net/timer.h"
-#include "net/timer_id.h"
+#include "evix/base/logging.h"
+#include "evix/net/event_loop.h"
+#include "evix/net/timer.h"
+#include "evix/net/timer_id.h"
 
+#include <errno.h>
+#include <string.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
 
-#include <cstring>
+using namespace xvorin::evix;
+using namespace xvorin::evix::net;
 
-namespace xvorin::evix::net {
-namespace detail {
+namespace {
 
 int create_timerfd()
 {
-    int timerfd = ::timerfd_create(CLOCK_MONOTONIC,
-        TFD_NONBLOCK | TFD_CLOEXEC);
+    int timerfd = ::timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if (timerfd < 0) {
+        EXLF("timerfd_create() failed: %s", strerror(errno));
     }
     return timerfd;
 }
@@ -38,28 +41,24 @@ void read_timerfd(int timerfd, Timestamp)
     uint64_t howmany;
     ssize_t n = ::read(timerfd, &howmany, sizeof howmany);
     if (n != sizeof howmany) {
+        EXLE("TimerQueue::read_timerfd() read %zd bytes instead of 8", n);
     }
 }
 
 void reset_timerfd(int timerfd, Timestamp expiration)
 {
-    struct itimerspec new_value;
-    struct itimerspec old_value;
+    struct itimerspec new_value = {};
+    struct itimerspec old_value = {};
     memset(&new_value, 0x00, sizeof new_value);
     memset(&old_value, 0x00, sizeof old_value);
     new_value.it_value = how_much_time_from_now(expiration);
     int ret = ::timerfd_settime(timerfd, 0, &new_value, &old_value);
     if (ret) {
+        EXLE("timerfd_settime() failed: %s", strerror(errno));
     }
 }
 
-} // namespace detail
-
-using namespace xvorin::evix;
-
-using namespace xvorin::evix::net;
-
-using namespace xvorin::evix::net::detail;
+} // namespace
 
 TimerQueue::TimerQueue(EventLoop* loop)
     : loop_(loop)
@@ -200,5 +199,3 @@ bool TimerQueue::insert(Timer* timer)
     assert(timers_.size() == active_timers_.size());
     return earliest_changed;
 }
-
-} // namespace xvorin::evix::net

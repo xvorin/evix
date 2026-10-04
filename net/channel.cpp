@@ -1,9 +1,11 @@
-#include "net/channel.h"
+#include "evix/net/channel.h"
 
-#include "net/event_loop.h"
+#include "evix/base/logging.h"
+#include "evix/net/event_loop.h"
+
+#include <sstream>
 
 #include <poll.h>
-#include <sstream>
 
 using namespace xvorin::evix;
 using namespace xvorin::evix::net;
@@ -73,6 +75,7 @@ void Channel::handle_event_with_guard(Timestamp receive_time)
 
     if ((revents_ & POLLHUP) && !(revents_ & POLLIN)) {
         if (log_hup_) {
+            EXLW("Channel::handle_event_with_guard() fd = %d POLLHUP", fd_);
         }
 
         if (close_callback_)
@@ -80,6 +83,7 @@ void Channel::handle_event_with_guard(Timestamp receive_time)
     }
 
     if (revents_ & POLLNVAL) {
+        EXLW("Channel::handle_event_with_guard() fd = %d POLLNVAL", fd_);
     }
 
     if (revents_ & (POLLERR | POLLNVAL)) {

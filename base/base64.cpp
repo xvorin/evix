@@ -1,4 +1,4 @@
-#include "base/base64.h"
+#include "evix/base/base64.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -112,7 +112,7 @@ size_t modp_b64_decode(char* dest, const char* src, size_t len);
  */
 #define modp_b64_encode_strlen(A) ((A + 2) / 3 * 4)
 
-#define MODP_B64_ERROR ((size_t) - 1)
+#define MODP_B64_ERROR ((size_t)-1)
 
 namespace xvorin::evix {
 
@@ -140,9 +140,8 @@ static size_t base64_decode_impl(const char* src, size_t len, std::string& dst)
 size_t base64_encode(const char* src, size_t len, char* dst)
 {
     std::string dest;
-    int size = base64_encode_impl(src, len, dest);
-    // strncpy(dst, dest.data(), size);
-    ::memcpy(dst, dest.data(), size);
+    size_t size = base64_encode_impl(src, len, dest);
+    ::memcpy(dst, dest.c_str(), size + 1); // include the trailing '\0'
     return size;
 }
 
@@ -173,7 +172,7 @@ std::string base64_encode(const std::string& src)
 size_t base64_decode(const char* src, size_t len, char* dst)
 {
     std::string dest;
-    int size = base64_decode_impl(src, len, dest);
+    size_t size = base64_decode_impl(src, len, dest);
     ::memcpy(dst, dest.c_str(), size);
     return size;
 }
@@ -265,7 +264,7 @@ std::string base64_decode(const std::string& src)
 
 /*
  * if we aren't doing padding
- * set the pad character to NULL
+ * set the pad character to nullptr
  */
 #ifndef DOPAD
 #undef CHARPAD
@@ -276,6 +275,7 @@ std::string base64_decode(const std::string& src)
 #define CHAR63 '/'
 #define CHARPAD '='
 
+// clang-format off
 static const char e0[256] = {
     'A', 'A', 'A', 'A', 'B', 'B', 'B', 'B', 'C', 'C', 'C', 'C', 'D', 'D', 'D', 'D', 'E', 'E', 'E', 'E', 'F', 'F',
     'F', 'F', 'G', 'G', 'G', 'G', 'H', 'H', 'H', 'H', 'I', 'I', 'I', 'I', 'J', 'J', 'J', 'J', 'K', 'K', 'K', 'K',
@@ -593,7 +593,7 @@ static const uint32_t d3[] = {
     0x01ffffff, 0x01ffffff, 0x01ffffff, 0x01ffffff, 0x01ffffff, 0x01ffffff, 0x01ffffff, 0x01ffffff, 0x01ffffff,
     0x01ffffff, 0x01ffffff, 0x01ffffff, 0x01ffffff
 };
-
+// clang-format on
 #endif
 
 size_t modp_b64_encode(char* dest, const char* str, size_t len)

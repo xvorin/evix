@@ -29,12 +29,10 @@ public:
 
     void count_down()
     {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            --count_;
-            if (count_ == 0) {
-                not_empty_.notify_all();
-            }
+        std::lock_guard<std::mutex> lock(mutex_);
+        --count_;
+        if (count_ == 0) {
+            not_empty_.notify_all();
         }
     }
 

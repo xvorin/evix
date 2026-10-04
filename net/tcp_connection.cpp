@@ -1,13 +1,15 @@
-#include "net/tcp_connection.h"
+#include "evix/net/tcp_connection.h"
 
-#include "base/weak_callback.h"
-#include "net/channel.h"
-#include "net/event_loop.h"
-#include "net/socket.h"
-#include "net/sockets_ops.h"
+#include "evix/base/logging.h"
+#include "evix/base/weak_callback.h"
+#include "evix/net/channel.h"
+#include "evix/net/event_loop.h"
+#include "evix/net/socket.h"
+#include "evix/net/sockets_ops.h"
 
 #include <assert.h>
 #include <errno.h>
+#include <string.h>
 
 using namespace xvorin::evix;
 using namespace xvorin::evix::net;
@@ -21,8 +23,8 @@ void xvorin::evix::net::defaultMessageCallback(const TcpConnectionPtr&, Buffer* 
     buf->retrieve_all();
 }
 
-TcpConnection::TcpConnection(EventLoop* loop, const std::string& nameArg, int sockfd, const InetAddress& localAddr,
-    const InetAddress& peerAddr)
+TcpConnection::TcpConnection(
+    EventLoop* loop, const std::string& nameArg, int sockfd, const InetAddress& localAddr, const InetAddress& peerAddr)
     : loop_(loop)
     , name_(nameArg)
     , state_(kConnecting)
@@ -282,6 +284,7 @@ void TcpConnection::handle_write()
                 }
             }
         } else {
+            EXLE("TcpConnection::handle_write() write to fd=%d failed: %s", channel_->fd(), strerror(errno));
         }
     } else {
     }
@@ -300,4 +303,6 @@ void TcpConnection::handle_close()
 
 void TcpConnection::handle_error()
 {
+    int err = sockets::get_socket_error(channel_->fd());
+    EXLE("TcpConnection::handle_error() SO_ERROR = %d %s", err, strerror(err));
 }

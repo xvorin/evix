@@ -2,11 +2,11 @@
 
 #include <arpa/inet.h>
 
-namespace xvorin::evix::net {
+namespace xvorin::evix::net::sockets {
 
-namespace sockets {
+int create_nonblocking_or_die(sa_family_t family);
 
-int createNonblockingOrDie(sa_family_t family);
+int create_nonblocking_udp_or_die(sa_family_t family);
 
 int connect(int sockfd, const struct sockaddr* addr);
 
@@ -52,6 +52,4 @@ struct sockaddr_in6 get_peer_addr(int sockfd);
 
 bool is_self_connect(int sockfd);
 
-} // namespace sockets
-
-} // namespace xvorin::evix::net
+} // namespace xvorin::evix::net::sockets

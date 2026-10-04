@@ -1,0 +1,49 @@
+# evix 代码风格 (clang-format)
+#
+# 基线取 WebKit: 4 空格缩进, 指针左贴类型(const std::string& x), 命名空间/类/控制语句
+# 的左花括号贴行尾, 仅函数定义的左花括号另起一行 —— 与现有 base/ net/ 代码一致。
+# 注意: 本仓库刻意不对全库做一次性 reformat, 该配置主要用于新增/改动代码的增量格式化与
+# include 归类。
+---
+Language: Cpp
+BasedOnStyle: WebKit
+
+ColumnLimit: 120
+PointerAlignment: Left
+NamespaceIndentation: None
+AllowShortFunctionsOnASingleLine: All
+AlwaysBreakTemplateDeclarations: true
+AlignAfterOpenBracket: DontAlign
+ReflowComments: false
+
+# ---------------------------------------------------------------------------
+# include 归类: 对应项目规范「按亲疏关系分 5 簇, 由近及远, 簇间空行」。
+#
+# clang-format 能力边界: 自身头文件(main header)由 IncludeIsMainRegex 自动置顶(簇1),
+# 其余各簇(本项目/三方/C++ 标准/C 标准)按下方正则归类并以空行分隔。
+# 「同模块(evix/net)其他头文件」与「本项目其他目录(evix/base)头文件」均为 "..." 引用,
+# 无法仅凭静态正则区分, 这一层仍依赖人工/评审按规范排列。
+# ---------------------------------------------------------------------------
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeIsMainRegex: '(_impl)?$'
+IncludeCategories:
+  # 簇2: 本项目头文件(双引号, 固定基点 evix/..., 禁止 ../)
+  - Regex: '^"'
+    Priority: 2
+  # 簇3: 三方库 (已知前缀的尖括号引用)
+  - Regex: '^<(glog|gflags|opencv2|protobuf|google|yaml-cpp|nlohmann|fmt|spdlog|ihs-|afl)'
+    Priority: 3
+  # 簇5: 系统/POSIX 头文件(带子目录的 <sys/...>, <netinet/...>, <arpa/...> 等).
+  # 必须排在三方库之后(让已知三方前缀先命中)、兜底之前(否则会被当成三方).
+  - Regex: '^<(sys|netinet|net|arpa|bits|linux|asm)/'
+    Priority: 5
+  # 簇5: 标准 C 头文件(<xxx.h>)
+  - Regex: '^<[^/]*\.h>'
+    Priority: 5
+  # 簇4: 标准 C++ 头文件(<xxx>, 无扩展名无斜杠)
+  - Regex: '^<[^/.]*>'
+    Priority: 4
+  # 兜底: 其余尖括号一律归三方
+  - Regex: '^<'
+    Priority: 3
